@@ -1,0 +1,32 @@
+{
+  "name": "rslide",
+  "version": "1.0.0",
+  "description": "RSlide — open-source live Q&A and polling (a self-hosted Slido alternative) on Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node tests/e2e.mjs"
+  },
+  "author": "Cameron Ashley",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4"
+  },
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/camster91/RSlide"
+  },
+  "keywords": [
+    "live-polling",
+    "q-and-a",
+    "audience-engagement",
+    "slido-alternative",
+    "cloudflare-workers",
+    "durable-objects",
+    "open-source"
+  ]
+}
