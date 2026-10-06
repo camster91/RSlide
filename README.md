@@ -2,9 +2,13 @@
 
 **Open-source live Q&A and polling.** A self-hosted alternative to tools like Slido, for classes, meetings, conferences and town halls.
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/camster91/RSlide)
+[![CI](https://github.com/camster91/RSlide/actions/workflows/ci.yml/badge.svg)](https://github.com/camster91/RSlide/actions/workflows/ci.yml)
+
 - No accounts for attendees — join with a short code, a link or a QR code
-- Real-time updates over WebSockets
-- Runs on Cloudflare Workers + Durable Objects: one tiny "room" per event, no database to manage, no build step
+- Real-time updates over WebSockets, tested with 2,000 attendees in one event
+- Runs on Cloudflare Workers + Durable Objects: one tiny "room" per event, no database server to manage
+- Small and fast: the attendee app is under 20 KB zipped
 - Easy to white-label: one config file and a handful of colour tokens
 
 > RSlide is an independent project. It is not affiliated with or endorsed by Slido or Cisco.
@@ -30,22 +34,22 @@
 
 ## Quick start
 
+You need Node.js 20 or newer.
+
 ```bash
 git clone https://github.com/camster91/RSlide.git
 cd RSlide
 npm install
-npm run dev          # http://localhost:8787
-```
-
-Run the end-to-end tests against the dev server (in a second terminal):
-
-```bash
-npm test
+npm run dev          # http://localhost:5173
 ```
 
 ## Deploy to Cloudflare
 
 Works on the Cloudflare Workers free plan.
+
+**One click:** use the **Deploy to Cloudflare** button at the top of this page.
+
+**From your computer:**
 
 ```bash
 npx wrangler login
@@ -54,41 +58,63 @@ npm run deploy
 
 You'll get a `*.workers.dev` URL. To use your own domain, add it under the Worker's **Settings → Domains & Routes** in the Cloudflare dashboard.
 
+### Settings
+
+Set these under `vars` in `wrangler.jsonc` (or in the Cloudflare dashboard):
+
+| Setting | What it does | Default |
+| --- | --- | --- |
+| `EVENT_TTL_HOURS` | Delete each event this many hours after it's created. Good for public demos. | empty (keep forever) |
+| `MAX_PARTICIPANTS` | Most attendees allowed in one event at the same time. | `0` (no limit) |
+
 ## Make it yours
 
 | What | Where |
 | --- | --- |
-| App name, logo, home-page text | `public/config.js` |
-| Colours | `:root` block at the top of `public/app.css` |
-| Fonts | Google Fonts link in `public/index.html` |
+| App name, logo, home-page text | `public/config.js` (no rebuild needed) |
+| Colours | `:root` block at the top of `src/web/styles.css` |
+| Fonts | Google Fonts link in `index.html` |
 | Favicon | `public/favicon.svg` |
 
 ## How it works
 
 ```
-Browser ──HTTP──▶ Worker (src/index.js) ──▶ static files in /public
+Browser ──HTTP──▶ Worker (src/worker/index.ts) ──▶ web app (Preact, built by Vite)
    │
    └──WebSocket──▶ EventRoom Durable Object (one per event code)
-                    • holds questions, votes, polls, responses
-                    • saves state to its built-in storage
-                    • pushes updates to every connected screen
+                    • SQLite tables for questions, votes, polls, responses
+                    • checks who may see and do what (host, big screen, attendee)
+                    • sends small batched updates (~every 80 ms) instead of the whole event
 ```
 
 - Each event code maps to its own Durable Object, so events never share state and scale independently.
-- Attendees are identified by a random ID stored in their browser (used for one vote per question and one answer per poll).
-- The host key is a random secret in the URL fragment (`#…`), so it isn't sent to servers in logs or referrers.
+- Attendees are identified by a random ID stored in their browser (one vote per question, one answer per poll).
+- The host key lives in the URL fragment (`#…`), so it never appears in page requests or referrer headers.
+
+## Tests
+
+```bash
+npm run typecheck
+npm test                     # unit tests
+npm run preview              # start the built app on http://localhost:8787, then in a second terminal:
+npm run test:e2e             # 50 end-to-end checks with a host, attendees and a big screen
+npm run test:load -- 2000    # 2,000 simulated attendees
+```
+
+Point `BASE_URL` at a deployed copy to test real performance: `BASE_URL=https://your-app.workers.dev npm run test:load -- 2000`.
 
 ## Project layout
 
 ```
-src/index.js       Worker + EventRoom Durable Object (all server logic)
-public/index.html  App shell
-public/config.js   Branding config
-public/app.js      Home, attendee, host and big-screen views (vanilla JS)
-public/app.css     Theme and layout
-tests/e2e.mjs      End-to-end tests (host + attendees over WebSockets)
-wrangler.jsonc     Cloudflare config
+src/shared/    Message types and state reducer (shared by server, browser and tests)
+src/worker/    Cloudflare Worker and the EventRoom Durable Object
+src/web/       Preact web app: views, components, styles
+public/        Static files, including config.js for branding
+tests/         Unit, end-to-end and load tests
+docs/          Roadmap and product plan
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for a deeper tour.
 
 ## Roadmap
 
@@ -96,7 +122,7 @@ See the full product plan in **[docs/ROADMAP.md](docs/ROADMAP.md)** — Slido Pr
 
 Next up (v0.2): design refresh with dark mode, quiz mode with timer and leaderboard, ranking polls, surveys, images in polls, reactions wall, event passcodes, and Excel/PDF export.
 
-Contributions welcome — pick any unchecked item and open an issue.
+Contributions welcome — read [CONTRIBUTING.md](CONTRIBUTING.md), pick any unchecked item and open an issue.
 
 ## License
 

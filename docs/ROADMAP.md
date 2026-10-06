@@ -2,7 +2,7 @@
 
 **Goal:** Everything Slido's Pro plan does, plus the things it doesn't — free, open source (MIT), and deployable in one command.
 
-Last updated: October 2026
+Last updated: October 2026 · Phase 0 done except the public demo
 
 ---
 
@@ -190,14 +190,14 @@ Colour contrast ≥ 4.5:1, focus rings, all actions keyboard-reachable, live reg
 ### Change
 | Area | Today | Plan |
 | --- | --- | --- |
-| Language | Plain JS | **TypeScript** (safer for contributors) |
-| Front end | One 500-line file, hand-built HTML strings | **Vite + Preact** (tiny React-style library, ~4 KB) split into components |
-| Live state storage | One JSON blob per event | **SQLite tables inside each Durable Object** (questions, votes, polls, responses) |
-| Updates to clients | Full state on every change | **Small patches**, batched every ~100 ms, so 5,000 people stay smooth |
+| Language | ~~Plain JS~~ | ✅ **TypeScript** |
+| Front end | ~~One 500-line file~~ | ✅ **Vite + Preact** components |
+| Live state storage | ~~One JSON blob per event~~ | ✅ **SQLite tables inside each Durable Object** |
+| Updates to clients | ~~Full state on every change~~ | ✅ **Small patches**, batched every ~80 ms |
 | Accounts + event list | None (host link only) | **Cloudflare D1** (serverless SQLite) for hosts, orgs, event index, analytics |
 | Images and logos | None | **Cloudflare R2** (file storage) |
 | Login | Secret host link | **Email magic link** (Cloudflare Email Service). Later: Google / Microsoft / SAML SSO |
-| Abuse protection | Basic rate limit | Rate limits per person + **Cloudflare Turnstile** (free captcha) on public events |
+| Abuse protection | ✅ Rate limits per person, participant cap | + **Cloudflare Turnstile** (free captcha) on public events |
 | AI | None | **Workers AI**, opt-in, off by default |
 
 ### Scale target
@@ -217,12 +217,12 @@ Colour contrast ≥ 4.5:1, focus rings, all actions keyboard-reachable, live reg
 Time estimates assume one main developer with AI help. Each phase ends with a tagged release and a demo update.
 
 ### Phase 0 — Foundations (week 1)
-- [ ] Live demo at a public URL (auto-deletes events after 24 h)
-- [ ] "Deploy to Cloudflare" button
-- [ ] CI pipeline, CONTRIBUTING.md, Code of Conduct, issue and PR templates
-- [ ] Move to TypeScript + Vite + Preact
-- [ ] SQLite tables in the Durable Object + patch-based updates
-- [ ] Load test: 2,000 attendees
+- [ ] Live demo at a public URL (auto-deletes events after 24 h) — *code ready (`EVENT_TTL_HOURS`, `MAX_PARTICIPANTS`); needs a Cloudflare account to deploy*
+- [x] "Deploy to Cloudflare" button — *works once the repo is public*
+- [x] CI pipeline, CONTRIBUTING.md, Code of Conduct, issue and PR templates
+- [x] Move to TypeScript + Vite + Preact
+- [x] SQLite tables in the Durable Object + patch-based updates
+- [x] Load test: 2,000 attendees — *passes locally: poll reaches all 2,000 in < 0.8 s, all votes counted*
 
 ### Phase 1 — Engage parity + design refresh (weeks 2–4) → **v0.2**
 - [ ] New design system, dark mode, theme presets

@@ -1,0 +1,70 @@
+// Load test: many attendees join one event, answer a poll and upvote questions at the same time.
+// Usage: start the app (`npm run preview`), then `npm run test:load -- 2000`
+// Point BASE_URL at a deployed copy to test real Cloudflare performance.
+import { Client, createEvent, sleep } from "./client";
+
+const N = Number(process.argv[2] || process.env.LOAD_N || 2000);
+const BATCH = 100;
+const pct = (arr: number[], p: number) => {
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))] ?? 0;
+};
+const ms = (n: number) => `${Math.round(n)} ms`;
+
+const ev = await createEvent(`Load test ${N}`);
+const host = await Client.connect(ev.code, "host", "host", ev.hostKey);
+console.log(`Event ${ev.code}: connecting ${N} attendees…`);
+
+const t0 = performance.now();
+const people: Client[] = [];
+for (let i = 0; i < N; i += BATCH) {
+  const batch = await Promise.all(Array.from({ length: Math.min(BATCH, N - i) }, (_, j) => Client.connect(ev.code, "attendee", `load${i + j}`)));
+  people.push(...batch);
+}
+const joinMs = performance.now() - t0;
+console.log(`✓ ${people.length} connected in ${ms(joinMs)}`);
+await host.until(() => host.snap.online === N, 6000);
+console.log(`✓ host sees ${host.snap.online} online`);
+
+// ----- everyone answers a poll at once -----
+host.send({ type: "savePoll", poll: { type: "multiple", title: "Load poll", options: ["A", "B", "C", "D"], correct: [], multi: false } });
+await host.until(() => host.snap.polls.length === 1);
+const pollId = host.snap.polls[0].id;
+const launchAt = performance.now();
+host.send({ type: "activatePoll", pollId });
+const seen = await Promise.all(people.map(async (p) => ((await p.until(() => p.snap.meta.activePollId === pollId, 15000)) ? performance.now() - launchAt : Infinity)));
+const reached = seen.filter(Number.isFinite);
+console.log(`✓ poll reached ${reached.length}/${N} attendees — p50 ${ms(pct(reached, 50))}, p95 ${ms(pct(reached, 95))}, max ${ms(Math.max(...reached))}`);
+
+const voteStart = performance.now();
+people.forEach((p, i) => p.send({ type: "respond", pollId, value: [i % 4] }));
+const allIn = await host.until(() => host.snap.results[pollId]?.total === N, 30000);
+const voteMs = performance.now() - voteStart;
+console.log(`${allIn ? "✓" : "✗"} host saw ${host.snap.results[pollId]?.total}/${N} votes in ${ms(voteMs)}`);
+const expected = [0, 1, 2, 3].map((k) => Math.floor(N / 4) + (k < N % 4 ? 1 : 0)).join();
+const countsOk = host.snap.results[pollId]?.counts?.join() === expected;
+console.log(`${countsOk ? "✓" : "✗"} counts correct (${host.snap.results[pollId]?.counts?.join()})`);
+await sleep(500);
+const attendeeSynced = people.filter((p) => p.snap.results[pollId]?.total === N).length;
+console.log(`✓ ${attendeeSynced}/${N} attendees see the final total`);
+
+// ----- Q&A burst: 50 questions, then everyone upvotes one -----
+for (let i = 0; i < 50; i++) people[i].send({ type: "ask", text: `Load question ${i}` });
+await host.until(() => host.snap.questions.length === 50, 10000);
+const qs = host.snap.questions;
+const upStart = performance.now();
+people.forEach((p, i) => p.send({ type: "vote", id: qs[i % qs.length].id }));
+const votesIn = await host.until(() => host.snap.questions.reduce((s, q) => s + q.votes, 0) === N, 30000);
+const upMs = performance.now() - upStart;
+console.log(`${votesIn ? "✓" : "✗"} ${host.snap.questions.reduce((s, q) => s + q.votes, 0)}/${N} upvotes reached host in ${ms(upMs)}`);
+
+// ----- bandwidth -----
+const bytes = people.reduce((s, p) => s + p.bytes, 0);
+const msgs = people.reduce((s, p) => s + p.messages, 0);
+console.log(`ℹ average per attendee: ${Math.round(msgs / N)} messages, ${(bytes / N / 1024).toFixed(1)} KB for the whole test`);
+
+const pass = reached.length === N && allIn && countsOk && votesIn;
+for (const p of people) p.close();
+host.close();
+console.log(pass ? "\nLOAD TEST PASSED" : "\nLOAD TEST FAILED");
+process.exit(pass ? 0 : 1);

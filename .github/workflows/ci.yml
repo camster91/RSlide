@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Start app
+        run: |
+          npx vite preview --port 8787 --host 127.0.0.1 > preview.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/ > /dev/null && break; sleep 1; done
+      - name: End-to-end tests
+        run: npm run test:e2e
+      - name: Load test (500 attendees)
+        run: |
+          ulimit -n 65536 || true
+          npm run test:load -- 500
+      - name: Server log
+        if: failure()
+        run: cat preview.log

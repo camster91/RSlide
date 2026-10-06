@@ -1,18 +1,32 @@
 {
   "name": "rslide",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "RSlide — open-source live Q&A and polling (a self-hosted Slido alternative) on Cloudflare Workers",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "test": "node tests/e2e.mjs"
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite build && vite preview",
+    "deploy": "vite build && wrangler deploy",
+    "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.web.json && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "tsx tests/e2e/e2e.ts",
+    "test:load": "tsx tests/e2e/load.ts"
   },
   "author": "Cameron Ashley",
   "license": "MIT",
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.62.5",
+    "@cloudflare/workers-types": "^5.20261006.1",
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.3",
+    "vitest": "^5.0.3",
     "wrangler": "^4.147.0"
   },
   "dependencies": {
+    "preact": "^11.0.0",
     "qrcode-generator": "^2.0.4"
   },
   "private": true,
@@ -28,5 +42,9 @@
     "cloudflare-workers",
     "durable-objects",
     "open-source"
-  ]
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
 }
