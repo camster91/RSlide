@@ -92,18 +92,11 @@ wrangler.jsonc     Cloudflare config
 
 ## Roadmap
 
-Contributions welcome. Open items:
+See the full product plan in **[docs/ROADMAP.md](docs/ROADMAP.md)** — Slido Pro feature parity, design direction, architecture and release phases.
 
-- [ ] Host accounts and a dashboard of past events (plus optional SSO)
-- [ ] Co-hosts and moderators
-- [ ] Surveys (multi-question polls) and quiz leaderboards
-- [ ] Profanity and keyword filter
-- [ ] Question replies and editing
-- [ ] Event scheduling and auto-close
-- [ ] Analytics page
-- [ ] Slides / Zoom / Teams integrations
-- [ ] Translations (i18n)
-- [ ] Accessibility audit (WCAG 2.1 AA)
+Next up (v0.2): design refresh with dark mode, quiz mode with timer and leaderboard, ranking polls, surveys, images in polls, reactions wall, event passcodes, and Excel/PDF export.
+
+Contributions welcome — pick any unchecked item and open an issue.
 
 ## License
 
