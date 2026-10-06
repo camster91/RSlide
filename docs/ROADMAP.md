@@ -2,7 +2,7 @@
 
 **Goal:** Everything Slido's Pro plan does, plus the things it doesn't — free, open source (MIT), and deployable in one command.
 
-Last updated: October 2026 · Phase 0 done except the public demo
+Last updated: October 2026 · Phases 0 and 1 done (v0.2), except the public demo
 
 ---
 
@@ -53,8 +53,8 @@ The two real advantages to protect:
 | Replies to questions (host and audience) | **Pro** | 🔜 P2 |
 | Labels / tags (e.g. "Finance", "Follow-up") | **Pro** | 🔜 P2 |
 | Multiple Q&A rooms in one event | **Pro** | 🔜 P2 |
-| Edit / withdraw your own question | Free | 🔜 P1 |
-| Downvotes (optional) | Free | 🔜 P1 |
+| Edit / withdraw your own question | Free | ✅ |
+| Downvotes (optional) | Free | ✅ |
 | "Similar question already asked" while typing | — | ➕ P3 |
 | AI merges duplicate questions | — | ➕ P3 |
 | Profanity / keyword filter | Pro | 🔜 P2 |
@@ -67,16 +67,16 @@ The two real advantages to protect:
 | Rating (stars) | Free | ✅ |
 | Open text | Free | ✅ |
 | Quiz with correct answer | Free | ✅ |
-| Ranking poll | Free | 🔜 P1 |
+| Ranking poll | Free | ✅ |
 | Unlimited polls | Engage | ✅ |
-| Images in poll options | Engage | 🔜 P1 |
-| Surveys (several questions in a row) | Engage | 🔜 P1 |
-| Quiz timer + points for speed | Free/Pro | 🔜 P1 |
-| Live leaderboard + podium | **Pro** | 🔜 P1 |
+| Images in poll options | Engage | ✅ |
+| Surveys (several questions in a row) | Engage | ✅ |
+| Quiz timer + points for speed | Free/Pro | ✅ |
+| Live leaderboard + podium | **Pro** | ✅ |
 | Team quiz mode | — | ➕ P3 |
 | 2×2 grid, 100-points, pin-on-image (Mentimeter types) | — | ➕ P2 |
-| Scale / slider poll | — | ➕ P1 |
-| Emoji reactions that float up on the big screen | — | ➕ P1 |
+| Scale / slider poll | — | ✅ ➕ |
+| Emoji reactions that float up on the big screen | — | ✅ ➕ |
 
 ### Hosting and control
 | Feature | Slido tier | RSlide |
@@ -84,10 +84,10 @@ The two real advantages to protect:
 | Big-screen present mode with QR | Free | ✅ |
 | Show/hide results from audience | Free | ✅ |
 | CSV export | Engage | ✅ |
-| Excel + PDF export | Engage | 🔜 P1 |
+| Excel + PDF export | Engage | ✅ |
 | Host accounts + event dashboard | Free | 🔜 P2 |
 | Co-hosts and moderators | Engage/Pro | 🔜 P2 |
-| Duplicate an event / reuse polls | Free | 🔜 P2 |
+| Duplicate an event / reuse polls | Free | ◐ duplicate polls ✅, events P2 |
 | Templates (icebreakers, retros, NPS…) | Free | 🔜 P2 |
 | Event dates, auto-open, auto-close | Free | 🔜 P2 |
 | Presenter remote (control from your phone) | — | ➕ P3 |
@@ -97,9 +97,9 @@ The two real advantages to protect:
 | Feature | Slido tier | RSlide |
 | --- | --- | --- |
 | Custom branding (logo, colours) — whole app | **Pro** | ✅ (config file) |
-| Custom branding per event | **Pro** | 🔜 P2 |
-| Event passcode | Pro | 🔜 P1 |
-| Require name or email to join ("verified participants") | Engage | 🔜 P1 |
+| Custom branding per event | **Pro** | ◐ theme per event ✅, logo P2 |
+| Event passcode | Pro | ✅ |
+| Require name or email to join ("verified participants") | Engage | ✅ |
 | Hide participant names from other attendees | **Pro** | 🔜 P2 |
 | Data retention / auto-delete | Enterprise | 🔜 P2 (free for us) |
 | SSO for hosts and participants | Enterprise | 🔜 P4 |
@@ -224,16 +224,16 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 - [x] SQLite tables in the Durable Object + patch-based updates
 - [x] Load test: 2,000 attendees — *passes locally: poll reaches all 2,000 in < 0.8 s, all votes counted*
 
-### Phase 1 — Engage parity + design refresh (weeks 2–4) → **v0.2**
-- [ ] New design system, dark mode, theme presets
-- [ ] Ranking poll, scale/slider poll
-- [ ] Surveys (multi-question)
-- [ ] Images in poll options (R2)
-- [ ] **Quiz mode:** timer, speed points, leaderboard, podium, confetti
-- [ ] Reactions wall
-- [ ] Edit/withdraw own question, optional downvotes
-- [ ] Event passcode; require name or email
-- [ ] Excel + PDF export
+### Phase 1 — Engage parity + design refresh (weeks 2–4) → **v0.2** ✅
+- [x] New design system, dark mode, theme presets (6 themes, light/dark big screen)
+- [x] Ranking poll, scale poll
+- [x] Surveys (multi-question, skippable, editable answers)
+- [x] Images in poll options (R2, auto-shrunk on upload)
+- [x] **Quiz mode:** timer, speed points (500–1,000), leaderboard, podium, confetti
+- [x] Reactions wall
+- [x] Edit/withdraw own question, optional downvotes
+- [x] Event passcode; require name or name + email
+- [x] Excel export + printable report (save as PDF)
 
 ### Phase 2 — Pro parity (weeks 5–8) → **v0.5**
 - [ ] Host accounts (magic link) + dashboard of events

@@ -13,6 +13,8 @@
     "bindings": [{ "name": "EVENTS", "class_name": "EventRoom" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["EventRoom"] }],
+  // Storage for images in poll options. Remove this block to turn image uploads off.
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "rslide-media" }],
   "vars": {
     // Delete events this many hours after they are created. Leave empty to keep forever.
     "EVENT_TTL_HOURS": "",

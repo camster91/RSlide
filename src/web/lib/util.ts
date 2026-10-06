@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import type { EventInfo, ScreenLook, ThemeName } from "../../shared/protocol";
 
 // ---------- branding ----------
 export interface BrandConfig {
@@ -114,13 +115,58 @@ export function useLocation(): string {
   return path;
 }
 
-export async function fetchEvent(code: string): Promise<{ code: string; title: string } | null> {
+export async function fetchEvent(code: string): Promise<EventInfo | null> {
   try {
     const r = await fetch(`/api/events/${encodeURIComponent(code)}`);
     return r.ok ? await r.json() : null;
   } catch {
     return null;
   }
+}
+
+// ---------- theme ----------
+/** Applies an event's colour theme and light/dark look to the whole page. */
+export function useTheme(theme: ThemeName | undefined, look: "auto" | ScreenLook = "auto") {
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = theme ?? "indigo";
+    root.dataset.look = look;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    const brand = getComputedStyle(root).getPropertyValue("--brand").trim();
+    if (meta && brand) meta.setAttribute("content", brand);
+  }, [theme, look]);
+}
+
+// ---------- passcodes (remembered per event on this device) ----------
+export const passcodeFor = (code: string) => store.get<string>(`rs.pass.${code}`, "");
+export const savePasscode = (code: string, pass: string) => store.set(`rs.pass.${code}`, pass);
+
+// ---------- images ----------
+export const mediaUrl = (code: string, id: string) => `/api/events/${code}/media/${id}`;
+
+/** Shrinks big photos before upload so they load fast on phones. */
+async function shrink(file: File, maxSide = 1200): Promise<Blob> {
+  if (file.type === "image/gif" || !("createImageBitmap" in window)) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    if (scale === 1 && file.size < 400_000) return file;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    return await new Promise((res) => canvas.toBlob((b) => res(b ?? file), "image/webp", 0.85));
+  } catch {
+    return file;
+  }
+}
+
+export async function uploadImage(code: string, key: string, file: File): Promise<string> {
+  const body = await shrink(file);
+  const r = await fetch(`/api/events/${code}/media?key=${encodeURIComponent(key)}`, { method: "POST", headers: { "content-type": body.type || file.type }, body });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Upload failed");
+  return d.id as string;
 }
 
 export function useTitle(title: string) {

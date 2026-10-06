@@ -22,14 +22,16 @@ export class Client {
   private ws!: WebSocket;
   private waiters: { check: () => boolean; resolve: () => void }[] = [];
 
-  static async connect(code: string, role: Role, pid: string, key?: string): Promise<Client> {
+  reactions: Record<string, number> = {};
+
+  static async connect(code: string, role: Role, pid: string, key?: string, pass?: string): Promise<Client> {
     const c = new Client();
-    await c.open(code, role, pid, key);
+    await c.open(code, role, pid, key, pass);
     return c;
   }
 
-  private open(code: string, role: Role, pid: string, key?: string) {
-    const qs = new URLSearchParams({ role, pid, ...(key ? { key } : {}) });
+  private open(code: string, role: Role, pid: string, key?: string, pass?: string) {
+    const qs = new URLSearchParams({ role, pid, ...(key ? { key } : {}), ...(pass ? { pass } : {}) });
     this.ws = new WebSocket(`${WS_BASE}/api/events/${code}/ws?${qs}`);
     return new Promise<void>((resolve, reject) => {
       let gotHello = false;
@@ -38,6 +40,7 @@ export class Client {
         this.bytes += (e.data as string).length;
         const m = JSON.parse(e.data as string) as ServerMsg;
         if (m.type === "error") this.errors.push(m.message);
+        else if (m.type === "reactions") for (const [k, n] of Object.entries(m.counts)) this.reactions[k] = (this.reactions[k] ?? 0) + (n ?? 0);
         else this.state = reduce(this.state, m);
         if (m.type === "hello" && !gotHello) {
           gotHello = true;

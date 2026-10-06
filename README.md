@@ -15,22 +15,26 @@
 
 ## Features
 
-**Attendees** — `/e/CODE`
-- Ask questions, named or anonymous; upvote other questions
-- Sort by popular or recent
-- Answer live polls and see results (when the host allows)
+**Attendees** — `/e/CODE` (no account, ever)
+- Ask questions, named or anonymous; upvote (and optionally downvote) others
+- Edit or withdraw your own questions
+- Answer 8 kinds of polls: multiple choice, quiz, rating, scale, ranking, word cloud, open text and multi-question surveys
+- Quiz mode with a countdown, points for speed and a live leaderboard
+- Send emoji reactions that float up the big screen
+- Works in light and dark mode, sized for one-handed phone use
 
 **Hosts** — `/host/CODE#hostkey` (private link, given when you create an event)
-- Q&A moderation: review before publishing, highlight ("Now answering"), mark answered, archive, delete
-- Open/close questions; allow or block anonymous questions
-- Five poll types: multiple choice (single or multi-select), quiz (with answer reveal), rating (1–5 stars), word cloud, open text
-- Prepare polls ahead of time, launch one at a time, close/reopen, reset, reorder, hide results from the audience
-- Choose what the big screen shows: auto, Q&A, poll, or join code
-- Export all questions and poll results to CSV
+- Q&A moderation: review first, show on screen, mark answered, archive, delete
+- Build polls ahead of time, with images on options; launch, close, reorder, duplicate, clear answers
+- Quiz: set a timer (or none), reveal the answer, show the leaderboard on the big screen
+- Event passcode, and ask people for their name or name + email before they join
+- Six colour themes per event; light or dark big screen
+- Export everything to Excel (questions, results, every answer, leaderboard, participants), CSV, or a printable report you can save as PDF
 
 **Big screen** — `/present/CODE`
-- Join URL, event code and QR code always visible
-- Live poll results, the highlighted question, and the top-voted questions
+- Giant join code, URL and QR code always visible
+- Live results for every poll type, quiz countdown and answer reveal
+- Podium leaderboard with confetti, floating reactions, highlighted question
 
 ## Quick start
 
@@ -66,13 +70,14 @@ Set these under `vars` in `wrangler.jsonc` (or in the Cloudflare dashboard):
 | --- | --- | --- |
 | `EVENT_TTL_HOURS` | Delete each event this many hours after it's created. Good for public demos. | empty (keep forever) |
 | `MAX_PARTICIPANTS` | Most attendees allowed in one event at the same time. | `0` (no limit) |
+| `MEDIA` (R2 bucket) | Stores images on poll options. Remove the `r2_buckets` block to turn image uploads off. | `rslide-media` |
 
 ## Make it yours
 
 | What | Where |
 | --- | --- |
 | App name, logo, home-page text | `public/config.js` (no rebuild needed) |
-| Colours | `:root` block at the top of `src/web/styles.css` |
+| Colours | Theme presets at the top of `src/web/styles.css` (hosts pick one per event) |
 | Fonts | Google Fonts link in `index.html` |
 | Favicon | `public/favicon.svg` |
 
@@ -97,8 +102,8 @@ Browser ──HTTP──▶ Worker (src/worker/index.ts) ──▶ web app (Prea
 npm run typecheck
 npm test                     # unit tests
 npm run preview              # start the built app on http://localhost:8787, then in a second terminal:
-npm run test:e2e             # 50 end-to-end checks with a host, attendees and a big screen
-npm run test:load -- 2000    # 2,000 simulated attendees
+npm run test:e2e             # 100+ end-to-end checks with a host, attendees and a big screen
+npm run test:load -- 2000    # 2,000 simulated attendees: poll, upvotes and a quiz reveal
 ```
 
 Point `BASE_URL` at a deployed copy to test real performance: `BASE_URL=https://your-app.workers.dev npm run test:load -- 2000`.

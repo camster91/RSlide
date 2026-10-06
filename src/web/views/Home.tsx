@@ -1,9 +1,10 @@
 import { useState } from "preact/hooks";
-import { CFG, fetchEvent, navigate, normCode, rememberHosted, store, toast, useTitle, type HostedEvent } from "../lib/util";
-import { TopBar } from "../components/ui";
+import { CFG, fetchEvent, navigate, normCode, rememberHosted, store, toast, useTheme, useTitle, type HostedEvent } from "../lib/util";
+import { Brand } from "../components/ui";
 
 export function Home() {
   useTitle(CFG.name);
+  useTheme("indigo");
   const mine = store.get<HostedEvent[]>("rs.hosted", []);
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
@@ -13,7 +14,7 @@ export function Home() {
     e.preventDefault();
     const c = normCode(code);
     if (!c) return toast("Type the event code");
-    if (!(await fetchEvent(c))) return toast("We couldn't find that event code");
+    if (!(await fetchEvent(c))) return toast(`No event found with code ${c}`);
     navigate(`/e/${c}`);
   };
 
@@ -27,74 +28,81 @@ export function Home() {
       rememberHosted({ code: d.code, key: d.hostKey, title: d.title, ts: Date.now() });
       navigate(`/host/${d.code}#${d.hostKey}`);
     } catch (err) {
-      toast((err as Error).message || "Could not create event");
+      toast((err as Error).message || "Could not create the event. Try again.");
       setBusy(false);
     }
   };
 
   return (
-    <>
-      <TopBar />
-      <section class="hero">
-        {CFG.heroKicker && (
-          <div class="kicker" style={{ color: "var(--accent)" }}>
-            {CFG.heroKicker}
-          </div>
-        )}
-        <h1 style={{ marginTop: 10 }}>{CFG.heroTitle}</h1>
-        {CFG.heroText && <p>{CFG.heroText}</p>}
-      </section>
-      <section class="home-cards">
-        <form class="card stack" onSubmit={join}>
-          <div class="kicker">Join a session</div>
-          <h2>Enter your event code</h2>
-          <input
-            class="input code-input"
-            maxLength={8}
-            placeholder="ABC123"
-            autoComplete="off"
-            autoCapitalize="characters"
-            aria-label="Event code"
-            value={code}
-            onInput={(e) => setCode(e.currentTarget.value)}
-          />
-          <button class="btn accent" style={{ width: "100%" }}>
-            Join
-          </button>
-        </form>
-        <form class="card stack" onSubmit={create}>
-          <div class="kicker">Host a session</div>
-          <h2>Start a new event</h2>
-          <input
-            class="input"
-            maxLength={120}
-            placeholder={CFG.titlePlaceholder}
-            aria-label="Event title"
-            value={title}
-            onInput={(e) => setTitle(e.currentTarget.value)}
-          />
-          <button class="btn" style={{ width: "100%" }} disabled={busy}>
-            Create event
-          </button>
-          {mine.length > 0 && (
-            <div>
-              <div class="muted small" style={{ margin: "8px 0 4px" }}>
-                Your recent events
+    <div class="home">
+      <header class="bar" style={{ background: "transparent", borderBottom: 0, position: "static" }}>
+        <Brand />
+      </header>
+      <main class="home-main">
+        <section>
+          {CFG.heroKicker && <p class="muted" style={{ fontWeight: 600, marginBottom: 14 }}>{CFG.heroKicker}</p>}
+          <h1>{CFG.heroTitle}</h1>
+          {CFG.heroText && <p class="home-lede">{CFG.heroText}</p>}
+        </section>
+
+        <section>
+          <form class="join-card" onSubmit={join}>
+            <h2>Join with a code</h2>
+            <label class="sr-only" for="code">
+              Event code
+            </label>
+            <input
+              id="code"
+              class="code-input"
+              maxLength={8}
+              placeholder="ABC123"
+              autoComplete="off"
+              autoCapitalize="characters"
+              inputMode="text"
+              value={code}
+              onInput={(e) => setCode(e.currentTarget.value)}
+            />
+            <button class="btn accent lg block" style={{ marginTop: 12 }}>
+              Join event
+            </button>
+          </form>
+
+          <form class="panel host-card stack" onSubmit={create}>
+            <h2>Host an event</h2>
+            <label class="label" for="title">
+              Event name
+            </label>
+            <input id="title" class="input" maxLength={120} placeholder={CFG.titlePlaceholder} value={title} onInput={(e) => setTitle(e.currentTarget.value)} style={{ marginTop: 0 }} />
+            <button class="btn block" disabled={busy}>
+              {busy ? "Creating…" : "Create event"}
+            </button>
+            {mine.length > 0 && (
+              <div class="recent">
+                <p class="muted small" style={{ marginTop: 6 }}>
+                  Your recent events on this device
+                </p>
+                <ul>
+                  {mine.slice(0, 5).map((e) => (
+                    <li key={e.code}>
+                      <span class="grow">{e.title}</span>
+                      <span class="chip code">{e.code}</span>
+                      <a class="btn sm ghost" href={`/host/${e.code}#${e.key}`}>
+                        Open
+                      </a>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              {mine.slice(0, 5).map((e) => (
-                <div class="row" style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }} key={e.code}>
-                  <span class="grow">
-                    {e.title} <span class="muted small">#{e.code}</span>
-                  </span>
-                  <a class="btn sm ghost" href={`/host/${e.code}#${e.key}`}>
-                    Open
-                  </a>
-                </div>
-              ))}
-            </div>
-          )}
-        </form>
-      </section>
-    </>
+            )}
+          </form>
+        </section>
+      </main>
+      <footer class="home-foot">
+        Free and open source under the MIT license.{" "}
+        <a href="https://github.com/camster91/RSlide" target="_blank" rel="noopener">
+          Get the code
+        </a>
+      </footer>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "rslide",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "RSlide — open-source live Q&A and polling (a self-hosted Slido alternative) on Cloudflare Workers",
   "scripts": {
     "dev": "vite dev",
@@ -26,6 +26,7 @@
     "wrangler": "^4.147.0"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "preact": "^11.0.0",
     "qrcode-generator": "^2.0.4"
   },

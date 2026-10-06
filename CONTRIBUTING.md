@@ -26,10 +26,12 @@ src/shared/     Message types and the client-side state reducer (used by server,
 src/worker/     Cloudflare Worker + EventRoom Durable Object (one per event)
   index.ts      HTTP routes
   room.ts       Real-time event room: SQLite storage, permissions, batched patches
-  logic.ts      Pure helpers: validation, tallies, rate limiting (unit-tested)
+  logic.ts      Pure helpers: validation, tallies, quiz points, rate limiting (unit-tested)
+  xlsx.ts       Tiny Excel writer used by exports
 src/web/        Preact front end
-  views/        Home, Attendee, Host, Present (big screen)
-  components/   Shared UI pieces
+  views/        Home, Attendee, Host, Present (big screen), Report
+  components/   Shared UI pieces: results for every poll type, countdown, podium, reactions
+  styles.css    Design tokens, 6 theme presets (light + dark) and all styles
   lib/          WebSocket hook, routing, storage helpers
 public/         Static files. config.js holds branding.
 tests/unit/     Vitest unit tests

@@ -58,12 +58,27 @@ const votesIn = await host.until(() => host.snap.questions.reduce((s, q) => s + 
 const upMs = performance.now() - upStart;
 console.log(`${votesIn ? "✓" : "✗"} ${host.snap.questions.reduce((s, q) => s + q.votes, 0)}/${N} upvotes reached host in ${ms(upMs)}`);
 
+// ----- quiz: everyone answers, then the reveal updates every score at once -----
+host.send({ type: "savePoll", poll: { type: "quiz", title: "Load quiz", options: ["A", "B"], correct: [0], multi: false, timeLimit: 60 } });
+await host.until(() => host.snap.polls.some((p) => p.title === "Load quiz"));
+const quizId = host.snap.polls.find((p) => p.title === "Load quiz")!.id;
+host.send({ type: "activatePoll", pollId: quizId });
+await Promise.all(people.map((p) => p.until(() => p.snap.meta.activePollId === quizId, 15000)));
+people.forEach((p, i) => p.send({ type: "respond", pollId: quizId, value: [i % 2] }));
+await host.until(() => host.snap.results[quizId]?.total === N, 30000);
+const revealAt = performance.now();
+host.send({ type: "revealAnswer", pollId: quizId });
+const scored = await Promise.all(people.map(async (p) => ((await p.until(() => p.state.me?.quiz != null, 30000)) ? performance.now() - revealAt : Infinity)));
+const gotScore = scored.filter(Number.isFinite);
+const quizOk = gotScore.length === N && host.snap.leaderboard.players === N;
+console.log(`${quizOk ? "✓" : "✗"} reveal: ${gotScore.length}/${N} got their score — p50 ${ms(pct(gotScore, 50))}, p95 ${ms(pct(gotScore, 95))}`);
+
 // ----- bandwidth -----
 const bytes = people.reduce((s, p) => s + p.bytes, 0);
 const msgs = people.reduce((s, p) => s + p.messages, 0);
 console.log(`ℹ average per attendee: ${Math.round(msgs / N)} messages, ${(bytes / N / 1024).toFixed(1)} KB for the whole test`);
 
-const pass = reached.length === N && allIn && countsOk && votesIn;
+const pass = reached.length === N && allIn && countsOk && votesIn && quizOk;
 for (const p of people) p.close();
 host.close();
 console.log(pass ? "\nLOAD TEST PASSED" : "\nLOAD TEST FAILED");

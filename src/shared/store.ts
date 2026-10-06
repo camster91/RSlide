@@ -7,15 +7,24 @@ export interface RoomState {
   snapshot: Snapshot | null;
   me: Me | null;
   hostKey?: string;
+  /** Server time minus local time, for accurate quiz countdowns. */
+  clockOffset: number;
 }
 
-export const emptyRoom = (): RoomState => ({ role: null, snapshot: null, me: null });
+export const emptyRoom = (): RoomState => ({ role: null, snapshot: null, me: null, clockOffset: 0 });
+
+/** Seconds left on a quiz timer (null when there is no timer). */
+export function secondsLeft(p: Poll, clockOffset: number, now = Date.now()): number | null {
+  if (!p.timeLimit || !p.startedAt || p.status !== "active") return null;
+  return Math.max(0, Math.ceil((p.startedAt + p.timeLimit * 1000 - (now + clockOffset)) / 1000));
+}
 
 export function applyOps(s: Snapshot, ops: Op[]): Snapshot {
   let questions = s.questions;
   let polls = s.polls;
   let results = s.results;
   let meta = s.meta;
+  let leaderboard = s.leaderboard;
   const qIndex = () => new Map(questions.map((q, i) => [q.id, i]));
   const pIndex = () => new Map(polls.map((p, i) => [p.id, i]));
   let qi: Map<string, number> | null = null;
@@ -64,10 +73,13 @@ export function applyOps(s: Snapshot, ops: Op[]): Snapshot {
         if (results === s.results) results = { ...results };
         results[op.id] = op.d;
         break;
+      case "lb":
+        leaderboard = op.d;
+        break;
     }
   }
   if (polls !== s.polls) polls = [...polls].sort((a, b) => a.ord - b.ord);
-  return { ...s, meta, questions, polls, results };
+  return { ...s, meta, questions, polls, results, leaderboard };
 }
 
 export function reduce(state: RoomState, msg: ServerMsg): RoomState {
@@ -78,6 +90,7 @@ export function reduce(state: RoomState, msg: ServerMsg): RoomState {
         snapshot: { ...msg.snapshot, polls: [...msg.snapshot.polls].sort((a, b) => a.ord - b.ord) },
         me: msg.me,
         hostKey: msg.hostKey,
+        clockOffset: msg.now - Date.now(),
       };
     case "patch":
       return state.snapshot ? { ...state, snapshot: applyOps(state.snapshot, msg.ops) } : state;
@@ -92,10 +105,12 @@ export function reduce(state: RoomState, msg: ServerMsg): RoomState {
 
 // ---------- view helpers ----------
 
+export const score = (q: Question) => q.votes - q.downs;
+
 export function sortQuestions(list: Question[], mode: "popular" | "recent"): Question[] {
   const a = [...list];
   if (mode === "recent") a.sort((x, y) => y.ts - x.ts);
-  else a.sort((x, y) => y.votes - x.votes || y.ts - x.ts);
+  else a.sort((x, y) => score(y) - score(x) || y.ts - x.ts);
   return a.sort((x, y) => Number(y.highlighted) - Number(x.highlighted));
 }
 
