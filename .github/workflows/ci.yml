@@ -28,10 +28,10 @@ jobs:
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/ > /dev/null && break; sleep 1; done
       - name: End-to-end tests
         run: npm run test:e2e
-      - name: Load test (500 attendees)
+      - name: Load test (2,000 attendees)
         run: |
           ulimit -n 65536 || true
-          npm run test:load -- 500
+          npm run test:load -- 2000
       - name: Server log
         if: failure()
         run: cat preview.log
