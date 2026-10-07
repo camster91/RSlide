@@ -38,7 +38,7 @@
 
 ## Quick start
 
-You need Node.js 20 or newer.
+Use Node.js 22.12 or newer on 22.x, or Node.js 24.x. The package engine range matches the locked build/test tools; CI checks dependency engines on 22.12.0, current 22.x and 24.x.
 
 ```bash
 git clone https://github.com/camster91/RSlide.git
