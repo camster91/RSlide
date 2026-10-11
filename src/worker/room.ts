@@ -58,8 +58,10 @@ import {
   type CleanPoll,
 } from "./logic";
 import { buildXlsx, type Cell, type Sheet } from "./xlsx";
+import { AI_DUPLICATE_SCORE, aiAvailable, embed, packVector, unpackVector, type AiEnv } from "./ai";
+import { DUPLICATE_SCORE, fingerprint, similarity, vectorScore, type Fingerprint } from "../shared/similar";
 
-export interface Env {
+export interface Env extends AiEnv {
   EVENTS: DurableObjectNamespace<EventRoom>;
   ASSETS: Fetcher;
   /** Optional R2 bucket for images in polls. */
@@ -104,6 +106,7 @@ type QuestionRow = {
   edited: number;
   room: string;
   labels: string;
+  dup_of: string | null;
 };
 
 type ReplyRow = { id: string; qid: string; text: string; name: string; pid: string; ts: number; official: number };
@@ -147,7 +150,7 @@ type Activity = "join" | "ask" | "vote" | "answer" | "react" | "reply";
 const FLUSH_MS = 80;
 const ONLINE_MS = 2000;
 const ROLES: Role[] = ["host", "mod", "present", "attendee"];
-const BOOL_SETTINGS = ["qaOpen", "moderation", "allowAnonymous", "allowDownvotes", "reactions", "audienceReplies", "hideNames"] as const;
+const BOOL_SETTINGS = ["qaOpen", "moderation", "allowAnonymous", "allowDownvotes", "reactions", "audienceReplies", "hideNames", "aiAssist"] as const;
 const IDENTITIES: Identity[] = ["none", "name", "email"];
 const PROFANITY: Profanity[] = ["off", "mask", "review"];
 /** Extra time allowed after a quiz timer ends, for slow networks. */
@@ -178,6 +181,8 @@ export class EventRoom extends DurableObject<Env> {
   /** Activity per minute, waiting to be saved for analytics. */
   private activity = new Map<string, number>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Word fingerprints of questions, for duplicate hints. Rebuilt on demand. */
+  private prints = new Map<string, Fingerprint>();
   private onlineTimer: ReturnType<typeof setTimeout> | null = null;
 
   private votesLimit = new RateLimiter(30, 10_000);
@@ -257,6 +262,9 @@ export class EventRoom extends DurableObject<Env> {
     this.addColumn("questions", "labels", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("polls", "axes", "TEXT NOT NULL DEFAULT 'null'");
     this.addColumn("polls", "image", "TEXT");
+    // v0.4: Smart Q&A
+    this.addColumn("questions", "dup_of", "TEXT");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS vectors (qid TEXT PRIMARY KEY, room TEXT NOT NULL, vec BLOB NOT NULL)");
   }
 
   private addColumn(table: string, column: string, def: string) {
@@ -749,6 +757,7 @@ export class EventRoom extends DurableObject<Env> {
           this.invalidateLb();
         }
         this.track("ask");
+        this.checkDuplicate(id, raw, room);
         this.touchQ(id);
         this.touchMe(pid);
         return true;
@@ -778,7 +787,10 @@ export class EventRoom extends DurableObject<Env> {
         const { text, hit } = this.filter(raw, role);
         const review = ev.settings.profanity === "review";
         const status = review && hit ? "pending" : q.status;
-        this.sql.exec("UPDATE questions SET text = ?, edited = 1, status = ? WHERE id = ?", review ? raw : text, status, q.id);
+        this.sql.exec("UPDATE questions SET text = ?, edited = 1, status = ?, dup_of = NULL WHERE id = ?", review ? raw : text, status, q.id);
+        this.sql.exec("DELETE FROM vectors WHERE qid = ?", q.id);
+        this.prints.delete(q.id);
+        this.checkDuplicate(q.id, raw, q.room);
         this.touchQ(q.id);
         return true;
       }
@@ -888,9 +900,88 @@ export class EventRoom extends DurableObject<Env> {
     for (const r of this.sql.exec<{ pid: string }>("DELETE FROM replies WHERE qid = ? RETURNING pid", id)) this.dirtyMe.add(r.pid);
     this.sql.exec("DELETE FROM votes WHERE qid = ?", id);
     this.sql.exec("DELETE FROM questions WHERE id = ?", id);
+    this.sql.exec("DELETE FROM vectors WHERE qid = ?", id);
+    this.prints.delete(id);
+    for (const r of this.sql.exec<{ id: string }>("UPDATE questions SET dup_of = NULL WHERE dup_of = ? RETURNING id", id)) this.touchQ(r.id);
     this.deletedQ.add(id);
     this.dirtyQ.delete(id);
     this.scheduleFlush();
+  }
+
+  // ---------- smart Q&A ----------
+
+  private printOf(id: string, text: string): Fingerprint {
+    let f = this.prints.get(id);
+    if (!f) this.prints.set(id, (f = fingerprint(text)));
+    return f;
+  }
+
+  /**
+   * Marks a new question as a likely repeat of an earlier one in the same room.
+   * Word matching runs right away; if the host turned on AI help, an AI check follows.
+   */
+  private checkDuplicate(id: string, text: string, room: string) {
+    const others = this.sql
+      .exec<{ id: string; text: string }>("SELECT id, text FROM questions WHERE room = ? AND id != ? AND status != 'archived' AND dup_of IS NULL ORDER BY ts DESC LIMIT 1000", room, id)
+      .toArray();
+    if (!others.length) return;
+    const mine = fingerprint(text);
+    this.prints.set(id, mine);
+    let best: { id: string; score: number } | null = null;
+    for (const o of others) {
+      const score = similarity(mine, this.printOf(o.id, o.text));
+      if (score >= DUPLICATE_SCORE && (!best || score > best.score)) best = { id: o.id, score };
+    }
+    if (best) this.sql.exec("UPDATE questions SET dup_of = ? WHERE id = ?", best.id, id);
+    if (this.ev!.settings.aiAssist && aiAvailable(this.env)) void this.aiDuplicate(id, text, room, !best);
+  }
+
+  /** Embeds the question; if no word match was found, compares it with stored vectors. */
+  private async aiDuplicate(id: string, text: string, room: string, look: boolean) {
+    let vec: number[];
+    try {
+      [vec] = await embed(this.env, [text]);
+    } catch (e) {
+      console.warn("AI duplicate check skipped:", (e as Error).message);
+      return;
+    }
+    // The question may have been removed while we waited.
+    const q = this.sql.exec<{ dup_of: string | null; room: string }>("SELECT dup_of, room FROM questions WHERE id = ?", id).toArray()[0];
+    if (!q) return;
+    if (look && !q.dup_of) {
+      let best: { id: string; score: number } | null = null;
+      for (const r of this.sql.exec<{ qid: string; vec: ArrayBuffer }>("SELECT v.qid, v.vec FROM vectors v JOIN questions q ON q.id = v.qid WHERE v.room = ? AND q.status != 'archived' AND q.dup_of IS NULL", room)) {
+        const score = vectorScore(vec, unpackVector(r.vec));
+        if (score >= AI_DUPLICATE_SCORE && (!best || score > best.score)) best = { id: r.qid, score };
+      }
+      if (best) {
+        this.sql.exec("UPDATE questions SET dup_of = ? WHERE id = ?", best.id, id);
+        this.touchQ(id);
+      }
+    }
+    this.sql.exec("INSERT OR REPLACE INTO vectors (qid, room, vec) VALUES (?,?,?)", id, q.room, packVector(vec));
+  }
+
+  /** Folds one question into another: its votes, its asker's support and its replies move over. */
+  private mergeQuestion(id: string, into: string) {
+    if (id === into) throw new UserError("Pick a different question to merge into");
+    const src = this.sql.exec<QuestionRow>("SELECT * FROM questions WHERE id = ?", id).toArray()[0];
+    const dst = this.sql.exec<QuestionRow>("SELECT * FROM questions WHERE id = ?", into).toArray()[0];
+    if (!src || !dst) throw new UserError("That question was removed");
+    const moved = this.sql.exec<{ pid: string }>("SELECT pid FROM votes WHERE qid = ?", id).toArray().map((r) => r.pid);
+    this.sql.exec("INSERT OR IGNORE INTO votes (qid, pid, v) SELECT ?, pid, v FROM votes WHERE qid = ?", into, id);
+    // Asking the same thing counts as an upvote.
+    if (src.pid !== dst.pid) this.sql.exec("INSERT OR IGNORE INTO votes (qid, pid, v) VALUES (?,?,1)", into, src.pid);
+    this.sql.exec("UPDATE replies SET qid = ? WHERE qid = ?", into, id);
+    // Merging is a moderation decision, so the kept question goes live.
+    if (dst.status === "pending") this.sql.exec("UPDATE questions SET status = 'live' WHERE id = ?", into);
+    // Other repeats of the removed question now point at the kept one.
+    for (const r of this.sql.exec<{ id: string }>("UPDATE questions SET dup_of = ? WHERE dup_of = ? AND id != ? RETURNING id", into, id, into)) this.touchQ(r.id);
+    if (src.highlighted && !dst.highlighted) this.sql.exec("UPDATE questions SET highlighted = 1 WHERE id = ?", into);
+    this.removeQuestion(id);
+    this.recountVotes(into);
+    this.touchQ(into);
+    for (const p of new Set([...moved, src.pid])) this.touchMe(p);
   }
 
   // ---------- moderation (host and moderators) ----------
@@ -936,7 +1027,15 @@ export class EventRoom extends DurableObject<Env> {
       }
       case "moveQuestion":
         if (!this.roomIds().has(msg.room)) throw new UserError("That room doesn't exist");
-        this.sql.exec("UPDATE questions SET room = ? WHERE id = ?", msg.room, msg.id);
+        this.sql.exec("UPDATE questions SET room = ?, dup_of = NULL WHERE id = ?", msg.room, msg.id);
+        this.sql.exec("UPDATE vectors SET room = ? WHERE qid = ?", msg.room, msg.id);
+        this.touchQ(msg.id);
+        return true;
+      case "mergeQuestion":
+        this.mergeQuestion(String(msg.id), String(msg.into));
+        return true;
+      case "notDuplicate":
+        this.sql.exec("UPDATE questions SET dup_of = NULL WHERE id = ?", msg.id);
         this.touchQ(msg.id);
         return true;
       default:
@@ -1023,6 +1122,8 @@ export class EventRoom extends DurableObject<Env> {
         }
         this.sql.exec("DELETE FROM votes");
         this.sql.exec("DELETE FROM replies");
+        this.sql.exec("DELETE FROM vectors");
+        this.prints.clear();
         this.dirtyAllMe = true;
         return this.scheduleFlush();
 
@@ -1226,6 +1327,7 @@ export class EventRoom extends DurableObject<Env> {
       room: r.room ?? MAIN_ROOM,
       labels: JSON.parse(r.labels || "[]"),
       replies: hide ? replies.map((x) => (x.official ? x : { ...x, name: "" })) : replies,
+      ...(r.dup_of && isStaff(role) ? { dupOf: r.dup_of } : {}),
     };
   }
 
@@ -1353,7 +1455,7 @@ export class EventRoom extends DurableObject<Env> {
       activePollId: ev.activePollId,
       labels: ev.labels,
       rooms: ev.rooms,
-      ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey } : {}),
+      ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey, ai: aiAvailable(this.env) } : {}),
     };
   }
 

@@ -716,3 +716,51 @@ button.label-chip { cursor: pointer; }
 .chart-tip { position: absolute; pointer-events: none; background: var(--text); color: var(--bg); border-radius: 10px; padding: 8px 10px; font-size: 0.8rem; line-height: 1.4; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); z-index: 5; }
 .chart-tip b { font-variant-numeric: tabular-nums; }
 .sr-table { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* ---------- v0.4: smart Q&A ---------- */
+.similar { margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--brand-soft); display: grid; gap: 8px; }
+.similar-q { display: flex; align-items: center; gap: 10px; background: var(--surface); border-radius: 10px; padding: 8px 8px 8px 12px; font-size: 0.92rem; }
+.similar-q .btn { flex: none; }
+.dup-hint { margin-top: 10px; padding: 10px 12px; border-radius: 12px; border: 1px dashed color-mix(in srgb, var(--brand) 45%, var(--line)); background: color-mix(in srgb, var(--brand-soft) 60%, transparent); display: grid; gap: 8px; }
+.dup-title { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600; color: var(--brand); }
+.dup-title svg { width: 14px; height: 14px; }
+.dup-text { font-size: 0.92rem; quotes: "“" "”"; }
+
+/* ---------- v0.4: phone remote ---------- */
+.remote { max-width: 520px; margin: 0 auto; padding: 14px 16px 40px; display: grid; gap: 16px; }
+.remote-head { display: flex; align-items: center; gap: 12px; }
+.remote-title { font-family: var(--display); font-weight: 700; font-size: 1.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.remote-seg { display: flex; width: 100%; }
+.remote-seg button { flex: 1; padding-left: 4px; padding-right: 4px; font-size: 0.85rem; }
+.remote-card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 16px; display: grid; gap: 12px; }
+.remote-poll { font-size: 1.3rem; line-height: 1.25; overflow-wrap: anywhere; }
+.remote-count { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); }
+.remote-count b { font-size: 2rem; color: var(--text); margin-right: 4px; }
+.remote-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.remote-nav { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
+.remote-nav .btn { min-height: 64px; font-size: 1.1rem; justify-content: center; }
+.remote-q { display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; background: var(--surface-2); border: 1px solid transparent; border-radius: 14px; padding: 12px 14px; color: inherit; font: inherit; cursor: pointer; min-height: 52px; }
+.remote-q:hover, .remote-q:focus-visible { border-color: var(--brand); }
+.remote-q.hl { display: grid; gap: 8px; background: var(--brand-soft); border-color: var(--brand); cursor: default; }
+.remote-q .text { overflow-wrap: anywhere; }
+.remote-votes { display: inline-flex; align-items: center; gap: 2px; font-weight: 700; color: var(--brand); min-width: 3ch; }
+.remote-votes svg { width: 14px; height: 14px; }
+.remote-modal .qr { width: min(240px, 70vw); margin: 8px auto; padding: 12px; background: #fff; border-radius: 16px; }
+.remote-modal .qr svg { width: 100%; height: auto; display: block; }
+
+/* ---------- v0.4: stream overlay (?overlay=1) ---------- */
+html.overlay-mode, html.overlay-mode body { background: transparent !important; }
+.overlay { position: fixed; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 12px; padding: 4vh 3vw; pointer-events: none; }
+.overlay.right { align-items: flex-end; }
+.ov-card { width: min(640px, 42vw); background: color-mix(in srgb, var(--surface) 94%, transparent); border-radius: 22px; padding: 20px 24px; box-shadow: 0 12px 40px rgba(10, 12, 40, 0.35); display: grid; gap: 12px; animation: ov-in 0.35s ease-out; }
+.ov-kicker { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.ov-kicker svg { width: 18px; height: 18px; }
+.ov-title { font-family: var(--display); font-weight: 700; font-size: clamp(1.2rem, 1.7vw, 2rem); line-height: 1.2; overflow-wrap: anywhere; margin: 0; }
+.ov-card .bars, .ov-card .opts { font-size: 0.95rem; }
+.ov-join { background: var(--brand); color: var(--on-brand); padding: 10px 18px; border-radius: 999px; font-size: clamp(0.9rem, 1.1vw, 1.25rem); box-shadow: 0 6px 24px rgba(10, 12, 40, 0.3); }
+.ov-code { letter-spacing: 0.08em; color: var(--accent); }
+@keyframes ov-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ov-card { animation: none; } }
+.code-snippet { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; margin-top: 8px; resize: none; }
+.remote-modal { width: min(460px, calc(100% - 24px)); display: grid; gap: 12px; }
+.remote-q.hl .tag { justify-self: start; }

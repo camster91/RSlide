@@ -22,7 +22,7 @@ import { resultsOf, sortQuestions } from "../../shared/store";
 import { TEMPLATES } from "../../shared/templates";
 import { useRoom, type Send } from "../lib/room";
 import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, toast, uploadImage, useTheme, useTitle } from "../lib/util";
-import { Board, ConnProblem, Countdown, Empty, Icon, LabelChip, Podium, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
+import { Board, ConnProblem, Countdown, Empty, Icon, LabelChip, Podium, QrCode, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
 
 type QTab = "live" | "pending" | "answered" | "archived";
 const Q_TABS: [QTab, string][] = [
@@ -67,6 +67,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   const [editing, setEditing] = useState<PollDraft | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [templates, setTemplates] = useState(false);
+  const [remote, setRemote] = useState(false);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const s = state.snapshot;
   useTitle(s ? `${moderator ? "Moderate" : "Host"}: ${s.meta.title}` : CFG.name);
@@ -87,6 +88,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   const showReview = !!s && (s.meta.settings.moderation || s.meta.settings.profanity === "review" || by.pending.length > 0);
   const tab = qTab === "pending" && !showReview ? "live" : qTab;
   const list = sortQuestions(by[tab], "popular");
+  const byId = new Map((s?.questions ?? []).map((q) => [q.id, q]));
   const act = (type: ModAction, id: string) => {
     if (type === "deleteQuestion" && !confirm("Delete this question for everyone?")) return;
     send({ type, id });
@@ -137,7 +139,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
       {list.length ? (
         <div class="q-list">
           {list.map((q) => (
-            <HostQuestion key={q.id} q={q} act={act} send={send} labels={labels} rooms={rooms} />
+            <HostQuestion key={q.id} q={q} act={act} send={send} labels={labels} rooms={rooms} original={q.dupOf ? byId.get(q.dupOf) : undefined} />
           ))}
         </div>
       ) : (
@@ -172,6 +174,9 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
         <ExportMenu code={code} hostKey={key} />
         <button class="btn sm ghost" onClick={() => setDrawer(true)} aria-label="Event settings">
           <Icon.gear /> Settings
+        </button>
+        <button class="btn sm ghost" onClick={() => setRemote(true)} title="Control polls and questions from your phone">
+          <Icon.phone /> Remote
         </button>
         <a class="btn sm accent" href={`/present/${code}#${key}`} target="_blank" rel="noopener">
           Open big screen
@@ -293,6 +298,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
       </main>
 
       {drawer && meta && <SettingsDrawer code={code} hostKey={key} meta={meta} send={send} onClose={() => setDrawer(false)} />}
+      {remote && <RemoteModal code={code} hostKey={key} onClose={() => setRemote(false)} />}
       {templates && (
         <TemplateGallery
           onClose={() => setTemplates(false)}
@@ -364,6 +370,41 @@ function ExportMenu({ code, hostKey }: { code: string; hostKey: string }) {
   );
 }
 
+// ---------- phone remote ----------
+
+function RemoteModal({ code, hostKey, onClose }: { code: string; hostKey: string; onClose: () => void }) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, []);
+  const url = `${location.origin}/remote/${code}#${hostKey}`;
+  return (
+    <>
+      <div class="drawer-backdrop" onClick={onClose} />
+      <div class="modal remote-modal" role="dialog" aria-modal="true" aria-label="Phone remote">
+        <div class="spread">
+          <h2>Control from your phone</h2>
+          <button class="btn sm quiet" onClick={onClose} aria-label="Close">
+            <Icon.x />
+          </button>
+        </div>
+        <p class="muted small">Scan with your phone camera. Move through polls, show results and put questions on the big screen while you're on stage.</p>
+        <QrCode url={url} />
+        <div class="row">
+          <button class="btn sm" onClick={() => copy(url, "Remote link copied. Keep it private.")}>
+            Copy remote link
+          </button>
+          <a class="btn sm ghost" href={url} target="_blank" rel="noopener">
+            Open here
+          </a>
+        </div>
+        <p class="notice small">This link has full host control. Only share it with people you trust.</p>
+      </div>
+    </>
+  );
+}
+
 // ---------- templates ----------
 
 function TemplateGallery({ onClose, onPick }: { onClose: () => void; onPick: (polls: PollDraft[]) => void }) {
@@ -399,7 +440,7 @@ function TemplateGallery({ onClose, onPick }: { onClose: () => void; onPick: (po
 
 // ---------- settings ----------
 
-type ToggleKey = "qaOpen" | "moderation" | "allowAnonymous" | "allowDownvotes" | "reactions" | "audienceReplies" | "hideNames";
+type ToggleKey = "qaOpen" | "moderation" | "allowAnonymous" | "allowDownvotes" | "reactions" | "audienceReplies" | "hideNames" | "aiAssist";
 function SettingToggle({ k, label, hint, settings, set }: { k: ToggleKey; label: string; hint?: string; settings: Settings; set: (p: Partial<Settings>) => void }) {
   return (
     <label class="toggle">
@@ -438,6 +479,8 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
   }, []);
   const Toggle = (p: { k: ToggleKey; label: string; hint?: string }) => <SettingToggle {...p} settings={settings} set={set} />;
   const modUrl = `${location.origin}/mod/${code}#${meta.modKey ?? ""}`;
+  const overlayUrl = `${location.origin}/present/${code}?overlay=1#${hostKey}`;
+  const embedCode = `<div data-rslide="${code}"></div>\n<script src="${location.origin}/embed.js" async></script>`;
   const deleteIn = (days: number | null) => set({ deleteAt: days ? Date.now() + days * 86_400_000 : null });
 
   return (
@@ -458,6 +501,14 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
         {Toggle({ k: "allowDownvotes", label: "Allow downvotes" })}
         {Toggle({ k: "audienceReplies", label: "Let attendees reply", hint: "You and your moderators can always reply." })}
         {Toggle({ k: "hideNames", label: "Hide names from the audience", hint: "Only you and moderators see who asked." })}
+        <p class="muted tiny" style={{ marginTop: 6 }}>
+          Repeated questions are spotted for you, so you can merge them. This runs on the server and nothing is sent elsewhere.
+        </p>
+        {meta.ai ? (
+          Toggle({ k: "aiAssist", label: "AI help for repeats", hint: "Also catches repeats worded differently, or in another language. Uses Workers AI on your Cloudflare account." })
+        ) : (
+          <p class="muted tiny">AI help is not set up on this server. See the README to turn it on.</p>
+        )}
 
         <p class="label">Open and close questions automatically</p>
         <div class="row">
@@ -570,6 +621,22 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
         </div>
         <button class="btn sm ghost" style={{ marginTop: 8 }} onClick={() => confirm("Make a new moderator link? The old link stops working and anyone using it is signed out.") && send({ type: "newModKey" })}>
           Make a new link
+        </button>
+
+        <h3>Stream and embed</h3>
+        <p class="label" style={{ marginTop: 0 }}>Stream overlay</p>
+        <p class="muted tiny">Add as a browser source in OBS, vMix or StreamYard (1920×1080). It has a see-through background and shows the live poll or the question on screen.</p>
+        <div class="mod-link" style={{ marginTop: 8 }}>
+          <input class="input" readOnly value={overlayUrl} aria-label="Stream overlay link" onFocus={(e) => e.currentTarget.select()} />
+          <button class="btn sm" onClick={() => copy(overlayUrl, "Overlay link copied. Keep it private.")}>
+            Copy
+          </button>
+        </div>
+        <p class="label">Embed on a website</p>
+        <p class="muted tiny">Paste this into any web page, like an event site or a course page. People can ask and vote without leaving it.</p>
+        <textarea class="input code-snippet" readOnly rows={3} aria-label="Embed code" value={embedCode} onFocus={(e) => e.currentTarget.select()} />
+        <button class="btn sm" style={{ marginTop: 8 }} onClick={() => copy(embedCode, "Embed code copied")}>
+          Copy embed code
         </button>
 
         <h3>Look</h3>
@@ -754,7 +821,15 @@ function RoomsEditor({ rooms, code, hostKey, onSave }: { rooms: Room[]; code: st
 
 // ---------- questions ----------
 
-function HostQuestion({ q, act, send, labels, rooms }: { q: Question; act: (type: ModAction, id: string) => void; send: Send; labels: Label[]; rooms: Room[] }) {
+function HostQuestion({ q, act, send, labels, rooms, original }: {
+  q: Question;
+  act: (type: ModAction, id: string) => void;
+  send: Send;
+  labels: Label[];
+  rooms: Room[];
+  /** The earlier question this one probably repeats. */
+  original?: Question;
+}) {
   const [replying, setReplying] = useState(false);
   const [reply, setReply] = useState("");
   const [tagging, setTagging] = useState(false);
@@ -769,6 +844,22 @@ function HostQuestion({ q, act, send, labels, rooms }: { q: Question; act: (type
         )}
         <div class="text">{q.text}</div>
         <QuestionMeta q={q} />
+        {original && (
+          <div class="dup-hint" role="note">
+            <span class="dup-title">
+              <Icon.copy /> Looks like a repeat of
+            </span>
+            <q class="dup-text">{original.text}</q>
+            <div class="row">
+              <button class="btn sm" onClick={() => send({ type: "mergeQuestion", id: q.id, into: original.id })} title="Move this question's votes and replies to the earlier one, then remove it">
+                Merge into that one
+              </button>
+              <button class="btn sm quiet" onClick={() => send({ type: "notDuplicate", id: q.id })}>
+                Not a repeat
+              </button>
+            </div>
+          </div>
+        )}
         {(q.labels.length > 0 || tagging) && (
           <div class="labels">
             {(tagging ? labels : labels.filter((l) => q.labels.includes(l.id))).map((l) => (

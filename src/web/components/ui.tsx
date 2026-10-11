@@ -52,6 +52,13 @@ export const Icon = {
   smile: () => svg(<><circle cx="12" cy="12" r="9" /><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" /></>),
   reply: () => svg(<path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />),
   tag: () => svg(<><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" /><circle cx="7.5" cy="7.5" r="1.5" /></>),
+  copy: () => svg(<><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></>),
+  phone: () => svg(<><rect x="6" y="2" width="12" height="20" rx="3" /><path d="M11 18h2" /></>),
+  prev: () => svg(<path d="m15 18-6-6 6-6" />),
+  next: () => svg(<path d="m9 18 6-6-6-6" />),
+  stop: () => svg(<rect x="6" y="6" width="12" height="12" rx="2" />),
+  eye: () => svg(<><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>),
+  check: () => svg(<path d="m5 12 5 5L20 7" />),
 };
 
 // ---------- chrome ----------
@@ -589,4 +596,21 @@ export function whenText(ts: number): string {
   const sameDay = d.toDateString() === new Date().toDateString();
   const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   return sameDay ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}
+
+/** QR code as an SVG. The QR library loads only when one is shown. */
+export function QrCode({ url }: { url: string }) {
+  const [svg, setSvg] = useState("");
+  // Loaded only on the big screen, so attendees' phones don't download it.
+  useEffect(() => {
+    import("qrcode-generator")
+      .then(({ default: qrcode }) => {
+        const qr = qrcode(0, "M");
+        qr.addData(url);
+        qr.make();
+        setSvg(qr.createSvgTag({ cellSize: 6, margin: 0, scalable: true }));
+      })
+      .catch(() => setSvg(""));
+  }, [url]);
+  return svg ? <div class="qr" dangerouslySetInnerHTML={{ __html: svg }} aria-label={`QR code for ${url}`} role="img" /> : null;
 }

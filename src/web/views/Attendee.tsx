@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { MAIN_ROOM, POINTS_BUDGET, REACTIONS, type EventInfo, type Item, type Label, type Poll, type Question, type ResponseValue, type Results } from "../../shared/protocol";
 import { activePoll, resultsOf, secondsLeft, sortQuestions } from "../../shared/store";
+import { findSimilar } from "../../shared/similar";
 import { useRoom, type Send } from "../lib/room";
 import { CFG, fetchEvent, mediaUrl, passcodeFor, plural, savePasscode, store, toast, useTheme, useTitle } from "../lib/util";
 import { Board, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, PinMap, Podium, QuestionLabels, Replies, whenText, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
@@ -196,6 +197,12 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
   const inRoom = rooms.length > 1 ? s.questions.filter((q) => q.room === roomId) : s.questions;
   const questions = sortQuestions(inRoom, sort);
   const visible = questions.filter((q) => q.status !== "pending").length;
+  // "Already asked?" — similar questions others asked, so people upvote instead of repeating.
+  const typed = useDebounced(text, 300);
+  const similar = useMemo(
+    () => (typed.trim().length < 12 ? [] : findSimilar(typed, inRoom.filter((q) => q.status === "live" && !mine.has(q.id)))),
+    [typed, inRoom, mine],
+  );
 
   const ask = (e: Event) => {
     e.preventDefault();
@@ -253,6 +260,30 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
           </button>
         </div>
         {settings.qaOpen && settings.moderation && <p class="muted tiny" style={{ marginTop: 8 }}>The host reviews questions before they appear.</p>}
+        {similar.length > 0 && (
+          <div class="similar" aria-live="polite">
+            <p class="small">
+              <b>Already asked?</b> <span class="muted">Upvote it instead, and it rises to the top.</span>
+            </p>
+            {similar.map(({ item: q }) => (
+              <div class="similar-q" key={q.id}>
+                <span class="grow">{q.text}</span>
+                <button
+                  type="button"
+                  class={`btn sm ${ups.has(q.id) ? "on" : "ghost"}`}
+                  aria-pressed={ups.has(q.id)}
+                  onClick={() => {
+                    if (!ups.has(q.id)) send({ type: "vote", id: q.id, dir: 1 });
+                    setText("");
+                    toast("Upvoted. Thanks!");
+                  }}
+                >
+                  <Icon.up /> {q.votes - q.downs}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </form>
 
       <div class="spread">
@@ -291,6 +322,15 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
       )}
     </>
   );
+}
+
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
 }
 
 function AttendeeQuestion({ q, up, down, mine, downvotes, labels, canReply, myReplies, defaultName, send }: {

@@ -1,6 +1,6 @@
 {
   "name": "rslide",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "RSlide — open-source live Q&A and polling (a self-hosted Slido alternative) on Cloudflare Workers",
   "scripts": {
     "dev": "vite dev",
@@ -9,7 +9,7 @@
     "deploy": "vite build && wrangler deploy",
     "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.web.json && tsc -p tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "tsx tests/e2e/e2e.ts && tsx tests/e2e/features.ts",
+    "test:e2e": "tsx tests/e2e/e2e.ts && tsx tests/e2e/features.ts && tsx tests/e2e/smart.ts",
     "test:load": "tsx tests/e2e/load.ts"
   },
   "author": "Cameron Ashley",

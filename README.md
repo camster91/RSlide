@@ -18,6 +18,7 @@
 **Attendees** — `/e/CODE` (no account, ever)
 - Ask questions, named or anonymous; upvote (and optionally downvote) others
 - Edit or withdraw your own questions; reply to others (when the host allows)
+- **"Already asked?"** — while you type, similar questions pop up so you can upvote instead of repeating
 - Pick a Q&A room when an event has several (e.g. one per session)
 - Answer 11 kinds of polls: multiple choice, quiz, rating, scale, ranking, word cloud, open text, 100 points, 2×2 grid, pin on image and multi-question surveys
 - Quiz mode with a countdown, points for speed and a live leaderboard
@@ -26,6 +27,8 @@
 
 **Hosts** — `/host/CODE#hostkey` (private link, given when you create an event)
 - Q&A moderation: review first, show on screen, mark answered, archive, delete, reply, label, move between rooms
+- **Repeat-question hints**: similar questions are flagged, and one click merges them (votes and replies move over). Optional AI help catches repeats worded differently or in another language
+- **Phone remote** (`/remote/CODE`): scan a QR code and run polls and pick questions from the stage
 - A separate **moderator link** for helpers who handle questions but can't touch polls or settings
 - Word filter (hide bad words, or send them to review) with your own word list; hide names from the audience
 - Open and close questions on a schedule; delete the whole event automatically on a set date
@@ -42,6 +45,14 @@
 - Live results for every poll type, quiz countdown and answer reveal
 - Podium leaderboard with confetti, floating reactions, highlighted question
 - One screen per room with `?room=` links
+- **Stream overlay** (`?overlay=1`): a see-through lower third for OBS, vMix or StreamYard
+
+**Your website** — paste two lines to embed the audience view (or live results) in any page:
+
+```html
+<div data-rslide="ABC123"></div>
+<script src="https://your-rslide-site/embed.js" async></script>
+```
 
 ## Quick start
 
@@ -78,6 +89,10 @@ Set these under `vars` in `wrangler.jsonc` (or in the Cloudflare dashboard):
 | `EVENT_TTL_HOURS` | Delete each event this many hours after it's created. Good for public demos. | empty (keep forever) |
 | `MAX_PARTICIPANTS` | Most attendees allowed in one event at the same time. | `0` (no limit) |
 | `MEDIA` (R2 bucket) | Stores images on poll options. Remove the `r2_buckets` block to turn image uploads off. | `rslide-media` |
+| `AI` (Workers AI binding) | Optional. Lets hosts turn on **AI help for repeats** (multilingual). Add `"ai": { "binding": "AI" }` to `wrangler.jsonc`. Local dev then needs `wrangler login`. | off |
+| `AI_ACCOUNT_ID` + `AI_API_TOKEN` | Optional. The same AI help, using a Workers AI API token instead of a binding. Set them as secrets. | empty |
+
+Repeat-question hints work without any AI: they compare words on your own server and send nothing elsewhere. AI help is off for every event until the host turns it on.
 
 ## Make it yours
 
@@ -109,7 +124,7 @@ Browser ──HTTP──▶ Worker (src/worker/index.ts) ──▶ web app (Prea
 npm run typecheck
 npm test                     # unit tests
 npm run preview              # start the built app on http://localhost:8787, then in a second terminal:
-npm run test:e2e             # 170+ end-to-end checks with hosts, moderators, attendees and a big screen
+npm run test:e2e             # 200+ end-to-end checks with hosts, moderators, attendees and a big screen
 npm run test:load -- 2000    # 2,000 simulated attendees: poll, upvotes and a quiz reveal
 ```
 
@@ -132,7 +147,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for a deeper tour.
 
 See the full product plan in **[docs/ROADMAP.md](docs/ROADMAP.md)** — Slido Pro feature parity, design direction, architecture and release phases.
 
-Next up (v0.2): design refresh with dark mode, quiz mode with timer and leaderboard, ranking polls, surveys, images in polls, reactions wall, event passcodes, and Excel/PDF export.
+Done: Slido Pro-level Q&A, polls, quizzes, moderation, analytics and exports (v0.1–v0.3), plus repeat-question merging, phone remote, stream overlay and website embed (v0.4).
+Next up: host accounts, AI recap of an event, paste-to-polls, public API and webhooks, translations.
 
 Contributions welcome — read [CONTRIBUTING.md](CONTRIBUTING.md), pick any unchecked item and open an issue.
 

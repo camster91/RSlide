@@ -73,6 +73,8 @@ export interface Settings {
   qaClosesAt: number | null;
   /** Delete the whole event at this time (ms). */
   deleteAt: number | null;
+  /** Use AI to spot questions that mean the same thing (needs Workers AI set up). */
+  aiAssist: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -92,6 +94,7 @@ export const DEFAULT_SETTINGS: Settings = {
   qaOpensAt: null,
   qaClosesAt: null,
   deleteAt: null,
+  aiAssist: false,
 };
 
 export interface Label {
@@ -120,6 +123,8 @@ export interface Meta {
   passcode?: string;
   /** Only sent to hosts: the key for the moderator link. */
   modKey?: string;
+  /** Only sent to hosts: true if this server has Workers AI set up. */
+  ai?: boolean;
 }
 
 export interface Reply {
@@ -144,6 +149,8 @@ export interface Question {
   room: string;
   labels: string[];
   replies: Reply[];
+  /** Only sent to hosts and moderators: an earlier question this one probably repeats. */
+  dupOf?: string;
 }
 
 export interface Range {
@@ -311,6 +318,9 @@ export type ClientMsg =
   | { type: "approve" | "answer" | "archive" | "highlight" | "deleteQuestion"; id: string }
   | { type: "tagQuestion"; id: string; label: string }
   | { type: "moveQuestion"; id: string; room: string }
+  /** Fold question `id` into `into`: votes and replies move over, `id` is removed. */
+  | { type: "mergeQuestion"; id: string; into: string }
+  | { type: "notDuplicate"; id: string }
   // host only
   | { type: "setTitle"; title: string }
   | { type: "setLabels"; labels: { id?: string; name: string; color: LabelColor }[] }

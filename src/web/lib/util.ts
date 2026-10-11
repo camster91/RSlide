@@ -46,7 +46,8 @@ export const store = {
 export const pid: string = (() => {
   const existing = store.get<string | null>("rs.pid", null);
   if (existing) return existing;
-  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  // getRandomValues works everywhere; randomUUID is missing on plain-HTTP sites.
+  const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (n) => n.toString(16).padStart(2, "0")).join("");
   store.set("rs.pid", id);
   return id;
 })();

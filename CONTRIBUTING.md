@@ -10,7 +10,7 @@ Thanks for helping! RSlide aims to be the best free, open-source alternative to 
 
 ## Set up
 
-You need Node.js 20 or newer.
+You need Node.js 22.12+ (22.x) or 24.x.
 
 ```bash
 git clone https://github.com/camster91/RSlide.git
@@ -22,18 +22,19 @@ npm run dev        # http://localhost:5173 — hot reload for the web app and th
 ## Project layout
 
 ```
-src/shared/     Message types, the client-side state reducer and built-in templates (used by server, browser and tests)
+src/shared/     Message types, the client-side state reducer, built-in templates and the similar-question matcher
 src/worker/     Cloudflare Worker + EventRoom Durable Object (one per event)
   index.ts      HTTP routes
   room.ts       Real-time event room: SQLite storage, permissions, batched patches
   logic.ts      Pure helpers: validation, tallies, quiz points, rate limiting (unit-tested)
   xlsx.ts       Tiny Excel writer used by exports
+  ai.ts         Optional Workers AI helpers (off unless set up)
 src/web/        Preact front end
-  views/        Home, Attendee, Host (also the moderator view), Present (big screen), Report, Analytics
+  views/        Home, Attendee, Host (also the moderator view), Present (big screen + stream overlay), Remote, Report, Analytics
   components/   Shared UI pieces: results for every poll type, countdown, podium, reactions
   styles.css    Design tokens, 6 theme presets (light + dark) and all styles
   lib/          WebSocket hook, routing, storage helpers
-public/         Static files. config.js holds branding.
+public/         Static files. config.js holds branding; embed.js is the website embed.
 tests/unit/     Vitest unit tests
 tests/e2e/      End-to-end and load tests against a running server
 ```

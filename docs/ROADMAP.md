@@ -247,12 +247,13 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 - [x] Mentimeter-style types: 2×2 grid, 100 points, pin on image
 
 ### Phase 3 — Beyond Slido (weeks 9–12) → **v1.0**
-- [ ] Smart Q&A (AI dedupe, similar-question hints, translate, moderation assist)
+- [x] Smart Q&A: repeat hints + one-click merge (no AI needed), "already asked?" while typing, optional Workers AI for reworded / other-language repeats
+- [ ] Smart Q&A, part 2: translate, moderation assist
 - [ ] Paste-to-polls (AI)
 - [ ] Recap pages + AI summary
-- [ ] Presenter remote
-- [ ] Stream overlay mode
-- [ ] Embed script for any website
+- [x] Presenter remote (`/remote/CODE`, QR code from the host page)
+- [x] Stream overlay mode (`/present/CODE?overlay=1`)
+- [x] Embed script for any website (`/embed.js`)
 - [ ] Public API + webhooks
 - [ ] PowerPoint web add-in
 - [ ] Translations (start: English, French, Spanish)

@@ -1,40 +1,35 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect } from "preact/hooks";
+import type { ComponentChildren } from "preact";
+import type { Poll, Snapshot } from "../../shared/protocol";
 import { activePoll, resultsOf, sortQuestions } from "../../shared/store";
 import { useRoom } from "../lib/room";
 import { CFG, joinUrl, plural, useTheme, useTitle } from "../lib/util";
-import { Board, Brand, ConnProblem, Confetti, Countdown, Icon, Podium, ResultsView, TYPE_LABEL, useFloaters } from "../components/ui";
-
-function QrCode({ url }: { url: string }) {
-  const [svg, setSvg] = useState("");
-  // Loaded only on the big screen, so attendees' phones don't download it.
-  useEffect(() => {
-    import("qrcode-generator")
-      .then(({ default: qrcode }) => {
-        const qr = qrcode(0, "M");
-        qr.addData(url);
-        qr.make();
-        setSvg(qr.createSvgTag({ cellSize: 6, margin: 0, scalable: true }));
-      })
-      .catch(() => setSvg(""));
-  }, [url]);
-  return svg ? <div class="qr" dangerouslySetInnerHTML={{ __html: svg }} aria-label={`QR code for ${url}`} role="img" /> : null;
-}
+import { Board, Brand, ConnProblem, Confetti, Countdown, Icon, Podium, QrCode, ResultsView, TYPE_LABEL, useFloaters } from "../components/ui";
 
 export function Present({ code }: { code: string }) {
   const key = decodeURIComponent(location.hash.slice(1));
   const floaters = useFloaters();
   const { state, status } = useRoom(code, "present", { key: key || undefined, onReactions: floaters.add });
   const s = state.snapshot;
+  const params = new URLSearchParams(location.search);
+  // ?overlay=1: a see-through layer for streaming software (OBS, vMix, StreamYard).
+  const overlay = params.has("overlay");
+  useEffect(() => {
+    if (!overlay) return;
+    document.documentElement.classList.add("overlay-mode");
+    return () => document.documentElement.classList.remove("overlay-mode");
+  }, [overlay]);
   useTitle(s ? `${s.meta.title} · ${CFG.name}` : CFG.name);
   useTheme(s?.meta.settings.theme, s?.meta.settings.screen ?? "light");
   if (status === "not-found") return <ConnProblem status={status} code={code} />;
 
   const poll = s ? activePoll(s) : undefined;
   // ?room=ID shows one room's questions, for events with a screen per room.
-  const roomParam = new URLSearchParams(location.search).get("room");
+  const roomParam = params.get("room");
   const room = s?.meta.rooms.find((r) => r.id === roomParam);
   const mode = !s ? "code" : s.meta.presentMode === "auto" ? (poll ? "poll" : "qa") : s.meta.presentMode;
   const host = location.host;
+  if (overlay && s) return <Overlay code={code} s={s} poll={poll} mode={mode} room={room?.id} clockOffset={state.clockOffset} floaters={floaters.layer} />;
 
   let stage = null;
   if (s && mode === "poll") {
@@ -172,6 +167,67 @@ function QuizWaiting({ count, options }: { count: number; options: string[] }) {
       <p class="muted" style={{ fontSize: "clamp(1rem, 1.5vw, 1.7rem)", marginTop: "3vh" }}>
         {plural(count, "answer")} so far
       </p>
+    </div>
+  );
+}
+
+/** Lower-third overlay for live streams: only what matters right now, on a see-through page. */
+function Overlay({ code, s, poll, mode, room, clockOffset, floaters }: {
+  code: string;
+  s: Snapshot;
+  poll: Poll | undefined;
+  mode: string;
+  room?: string;
+  clockOffset: number;
+  floaters: ComponentChildren;
+}) {
+  const side = new URLSearchParams(location.search).get("pos") === "right" ? "right" : "left";
+  const hl = s.questions.find((q) => q.highlighted && q.status === "live" && (!room || q.room === room));
+  let card = null;
+  if (mode === "poll" && poll) {
+    card = (
+      <div class="ov-card">
+        <div class="ov-kicker">
+          <span class="tag live">{poll.type === "quiz" ? "Quiz" : "Live poll"}</span>
+          {poll.type === "quiz" && !poll.revealed && <Countdown poll={poll} clockOffset={clockOffset} />}
+        </div>
+        <h2 class="ov-title">{poll.title}</h2>
+        {poll.type === "quiz" && !poll.revealed ? (
+          <p class="muted">{plural(resultsOf(s, poll.id).total, "answer")} so far</p>
+        ) : (
+          <ResultsView poll={poll} results={resultsOf(s, poll.id)} code={code} />
+        )}
+      </div>
+    );
+  } else if (mode === "leaderboard" && s.leaderboard.top.length) {
+    card = (
+      <div class="ov-card">
+        <div class="ov-kicker">
+          <Icon.trophy /> Leaderboard
+        </div>
+        <Board board={s.leaderboard} limit={5} />
+      </div>
+    );
+  } else if (mode === "qa" && hl) {
+    card = (
+      <div class="ov-card ov-question">
+        <div class="ov-kicker">
+          <span class="tag hl">Question</span>
+          <span class="muted small">
+            {hl.name || "Anonymous"} · {plural(hl.votes - hl.downs, "vote")}
+          </span>
+        </div>
+        <div class="ov-title">{hl.text}</div>
+      </div>
+    );
+  }
+  return (
+    <div class={`overlay ${side}`} aria-live="polite">
+      {card}
+      <div class="ov-join">
+        Join at <b>{location.host}</b> · code <b class="ov-code">{code}</b>
+      </div>
+      {floaters}
     </div>
   );
 }
