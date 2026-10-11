@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { REACTIONS, type EventInfo, type Item, type Poll, type Question, type ResponseValue, type Results } from "../../shared/protocol";
+import { MAIN_ROOM, POINTS_BUDGET, REACTIONS, type EventInfo, type Item, type Label, type Poll, type Question, type ResponseValue, type Results } from "../../shared/protocol";
 import { activePoll, resultsOf, secondsLeft, sortQuestions } from "../../shared/store";
 import { useRoom, type Send } from "../lib/room";
 import { CFG, fetchEvent, mediaUrl, passcodeFor, plural, savePasscode, store, toast, useTheme, useTitle } from "../lib/util";
-import { Board, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, Podium, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
+import { Board, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, PinMap, Podium, QuestionLabels, Replies, whenText, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
 
 type Tab = "qa" | "polls" | "board";
 
@@ -135,7 +135,7 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
 
   return (
     <>
-      <TopBar title={s.meta.title}>
+      <TopBar title={s.meta.title} logo={s.meta.settings.logo} code={code}>
         <span class="chip code">{code}</span>
         <ConnDot status={status} />
       </TopBar>
@@ -185,7 +185,16 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
   const ups = useMemo(() => new Set(me.votes), [me.votes]);
   const downs = useMemo(() => new Set(me.downs), [me.downs]);
   const mine = useMemo(() => new Set(me.questions), [me.questions]);
-  const questions = sortQuestions(s.questions, sort);
+  const myReplies = useMemo(() => new Set(me.replies), [me.replies]);
+  const rooms = s.meta.rooms;
+  const [room, setRoom] = useState(() => store.get(`rs.room.${s.meta.code}`, rooms[0]?.id ?? MAIN_ROOM));
+  const roomId = rooms.some((r) => r.id === room) ? room : (rooms[0]?.id ?? MAIN_ROOM);
+  const pickRoom = (id: string) => {
+    setRoom(id);
+    store.set(`rs.room.${s.meta.code}`, id);
+  };
+  const inRoom = rooms.length > 1 ? s.questions.filter((q) => q.room === roomId) : s.questions;
+  const questions = sortQuestions(inRoom, sort);
   const visible = questions.filter((q) => q.status !== "pending").length;
 
   const ask = (e: Event) => {
@@ -193,13 +202,25 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
     const t = text.trim();
     if (!t) return toast("Type your question first");
     if (!named) store.set("rs.name", name.trim());
-    send({ type: "ask", text: t, name: named ? undefined : name.trim() });
+    send({ type: "ask", text: t, name: named ? undefined : name.trim(), room: roomId });
     setText("");
     toast(settings.moderation ? "Sent. The host will review it soon." : "Question sent");
   };
 
   return (
     <>
+      {rooms.length > 1 && (
+        <div class="room-tabs" role="group" aria-label="Q&A rooms">
+          {rooms.map((r) => (
+            <button key={r.id} aria-pressed={r.id === roomId} onClick={() => pickRoom(r.id)}>
+              {r.name}
+              <span class="count">{s.questions.filter((q) => q.room === r.id && q.status !== "pending").length}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {!settings.qaOpen && settings.qaOpensAt && <p class="notice">Questions open at {whenText(settings.qaOpensAt)}.</p>}
+      {settings.qaOpen && settings.qaClosesAt && <p class="notice">Questions close at {whenText(settings.qaClosesAt)}.</p>}
       <form class="ask" onSubmit={ask}>
         <label class="sr-only" for="qtext">
           Your question
@@ -248,7 +269,19 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
       {questions.length ? (
         <div class="q-list">
           {questions.map((q) => (
-            <AttendeeQuestion key={q.id} q={q} up={ups.has(q.id)} down={downs.has(q.id)} mine={mine.has(q.id)} downvotes={settings.allowDownvotes} send={send} />
+            <AttendeeQuestion
+              key={q.id}
+              q={q}
+              up={ups.has(q.id)}
+              down={downs.has(q.id)}
+              mine={mine.has(q.id)}
+              downvotes={settings.allowDownvotes}
+              labels={s.meta.labels}
+              canReply={settings.audienceReplies && q.status !== "pending"}
+              myReplies={myReplies}
+              defaultName={named ? me.name : name}
+              send={send}
+            />
           ))}
         </div>
       ) : (
@@ -260,7 +293,20 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
   );
 }
 
-function AttendeeQuestion({ q, up, down, mine, downvotes, send }: { q: Question; up: boolean; down: boolean; mine: boolean; downvotes: boolean; send: Send }) {
+function AttendeeQuestion({ q, up, down, mine, downvotes, labels, canReply, myReplies, defaultName, send }: {
+  q: Question;
+  up: boolean;
+  down: boolean;
+  mine: boolean;
+  downvotes: boolean;
+  labels: Label[];
+  canReply: boolean;
+  myReplies: Set<string>;
+  defaultName: string;
+  send: Send;
+}) {
+  const [replying, setReplying] = useState(false);
+  const [reply, setReply] = useState("");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(q.text);
   const canEdit = mine && (q.status === "pending" || q.status === "live");
@@ -294,6 +340,31 @@ function AttendeeQuestion({ q, up, down, mine, downvotes, send }: { q: Question;
           <div class="text">{q.text}</div>
         )}
         <QuestionMeta q={q} mine={mine} />
+        <QuestionLabels q={q} labels={labels} />
+        <Replies replies={q.replies} canDelete={(r) => myReplies.has(r.id)} onDelete={(r) => send({ type: "deleteReply", id: q.id, replyId: r.id })} />
+        {canReply && !replying && (
+          <button class="link-btn" style={{ marginTop: 8 }} onClick={() => setReplying(true)}>
+            Reply
+          </button>
+        )}
+        {replying && (
+          <form
+            class="reply-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!reply.trim()) return toast("Type a reply first");
+              send({ type: "reply", id: q.id, text: reply.trim(), name: defaultName.trim() || undefined });
+              setReply("");
+              setReplying(false);
+            }}
+          >
+            <input class="input" maxLength={300} placeholder="Write a reply" aria-label="Your reply" autoFocus value={reply} onInput={(e) => setReply(e.currentTarget.value)} />
+            <button class="btn sm">Send</button>
+            <button type="button" class="btn sm quiet" onClick={() => setReplying(false)}>
+              Cancel
+            </button>
+          </form>
+        )}
         {mine && !editing && (
           <div class="actions">
             {canEdit && (
@@ -393,6 +464,78 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
       </>
     );
   }
+  if (item.type === "points") {
+    const vals = Array.isArray(value) && value.length === item.options.length ? (value as number[]) : item.options.map(() => 0);
+    const used = vals.reduce((a, b) => a + b, 0);
+    const left = POINTS_BUDGET - used;
+    const set = (i: number, n: number) => {
+      // Never let one slider push the total past the budget.
+      const others = used - vals[i];
+      onChange(vals.map((v, j) => (j === i ? Math.max(0, Math.min(n, POINTS_BUDGET - others)) : v)));
+    };
+    return (
+      <div class="points-list">
+        {item.options.map((o, i) => (
+          <label class="points-row" key={i}>
+            <span>{o}</span>
+            <b>{vals[i]}</b>
+            <input type="range" min={0} max={POINTS_BUDGET} step={5} value={vals[i]} disabled={disabled} aria-label={`Points for ${o}`} onInput={(e) => set(i, Number(e.currentTarget.value))} />
+          </label>
+        ))}
+        <div class={`points-left ${left < 0 ? "over" : ""}`} aria-live="polite">
+          <span>Points left</span>
+          <span class="num">{left}</span>
+        </div>
+      </div>
+    );
+  }
+  if (item.type === "grid") {
+    const r = item.range ?? { min: 1, max: 10 };
+    const mid = Math.round((r.min + r.max) / 2);
+    const vals = Array.isArray(value) && value.length === item.options.length ? (value as [number, number][]) : item.options.map(() => [mid, mid] as [number, number]);
+    const [ax, ay] = item.axes ?? ["X", "Y"];
+    const set = (i: number, k: 0 | 1, n: number) => onChange(vals.map((xy, j) => (j === i ? ((k ? [xy[0], n] : [n, xy[1]]) as [number, number]) : xy)));
+    return (
+      <div class="grid-answer">
+        <p class="muted small">
+          Score each option from {r.min} to {r.max}.
+        </p>
+        {item.options.map((o, i) => (
+          <fieldset key={i}>
+            <legend>{o}</legend>
+            {([0, 1] as const).map((k) => (
+              <label key={k}>
+                {k ? ay : ax}
+                <input type="range" min={r.min} max={r.max} value={vals[i][k]} disabled={disabled} onInput={(e) => set(i, k, Number(e.currentTarget.value))} />
+                <b>{vals[i][k]}</b>
+              </label>
+            ))}
+          </fieldset>
+        ))}
+      </div>
+    );
+  }
+  if (item.type === "pin") {
+    const xy = Array.isArray(value) && value.length === 2 && typeof value[0] === "number" ? (value as unknown as [number, number]) : null;
+    const tap = (e: MouseEvent) => {
+      if (disabled) return;
+      const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const p: [number, number] = [Math.min(1, Math.max(0, (e.clientX - box.left) / box.width)), Math.min(1, Math.max(0, (e.clientY - box.top) / box.height))];
+      onChange(p as unknown as ResponseValue);
+      onPick?.(p as unknown as ResponseValue);
+    };
+    return item.image ? (
+      <div>
+        <p class="muted small" style={{ marginBottom: 8 }}>
+          Tap the picture to drop your pin. Tap again to move it.
+        </p>
+        <div class="pin-wrap pin-tap" onClick={tap} role="button" aria-label="Picture to tap on">
+          <img src={mediaUrl(code, item.image)} alt="" />
+          {xy && <i class="pin-dot mine" style={{ left: `${xy[0] * 100}%`, top: `${xy[1] * 100}%` }} />}
+        </div>
+      </div>
+    ) : null;
+  }
   if (item.type === "rating") {
     const v = typeof value === "number" ? value : 0;
     return (
@@ -489,11 +632,19 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
 }
 
 /** True when an item's draft value can be sent. */
-const ready = (item: Item, v: ResponseValue | null) =>
-  v !== null && v !== "" && !(Array.isArray(v) && !v.length) && !(typeof v === "string" && !v.trim());
+const ready = (item: Item, v: ResponseValue | null) => {
+  if (item.type === "points") return Array.isArray(v) && (v as number[]).some((n) => n > 0);
+  if (item.type === "grid") return true; // sliders always have a value
+  return v !== null && v !== "" && !(Array.isArray(v) && !v.length) && !(typeof v === "string" && !v.trim());
+};
 
 /** Converts a draft value to what the server expects. */
 const toWire = (item: Item, v: ResponseValue | null): ResponseValue | null => {
+  if (item.type === "grid" && !Array.isArray(v)) {
+    const r = item.range ?? { min: 1, max: 10 };
+    const mid = Math.round((r.min + r.max) / 2);
+    return item.options.map(() => [mid, mid]) as [number, number][];
+  }
   if (!ready(item, v)) return item.type === "ranking" ? item.options.map((_, i) => i) : null;
   if (item.type === "wordcloud") return [String(v).trim()];
   if (item.type === "open") return String(v).trim();
@@ -511,8 +662,10 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
   const answered = mine !== null;
   const item = poll as unknown as Item;
   const freeText = poll.type === "wordcloud" || poll.type === "open";
-  const oneTap = poll.type === "rating" || poll.type === "scale" || (poll.type === "multiple" && !poll.multi);
+  const oneTap = poll.type === "rating" || poll.type === "scale" || poll.type === "pin" || (poll.type === "multiple" && !poll.multi);
   const [draft, setDraft] = useState<ResponseValue | null>(freeText ? "" : mine);
+  const [movingPin, setMovingPin] = useState(false);
+  const pinDone = poll.type === "pin" && answered && !movingPin;
   useEffect(() => {
     if (!freeText) setDraft(mine);
   }, [JSON.stringify(mine)]);
@@ -531,7 +684,22 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
         <span class="muted small">{TYPE_LABEL[poll.type]}</span>
       </div>
       <h2>{poll.title}</h2>
-      <ItemInput item={item} code={code} value={draft} onChange={setDraft} onPick={oneTap ? (v) => submit(v) : undefined} />
+      {!pinDone && (
+        <ItemInput
+          item={item}
+          code={code}
+          value={draft}
+          onChange={setDraft}
+          onPick={
+            oneTap
+              ? (v) => {
+                  submit(v);
+                  setMovingPin(false);
+                }
+              : undefined
+          }
+        />
+      )}
       {!oneTap && (
         <div class="row" style={{ marginTop: 14 }}>
           <button class="btn accent" onClick={() => submit()}>
@@ -541,12 +709,26 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
       )}
       {answered && (
         <p class="muted small" style={{ marginTop: 10 }}>
-          ✓ {freeText ? "Sent. You can send another." : oneTap ? "Answer saved. Tap again to change it." : "Answer saved."}
+          ✓ {freeText ? "Sent. You can send another." : poll.type === "pin" ? "Pin dropped." : oneTap ? "Answer saved. Tap again to change it." : "Answer saved."}
         </p>
       )}
       {answered && (
         <div style={{ marginTop: 20 }}>
-          <ResultsView poll={poll} results={results} code={code} />
+          {poll.type === "pin" ? (
+            pinDone && (
+              <>
+                {poll.image && (
+                  <PinMap src={mediaUrl(code, poll.image)} pins={results.pins ?? []} big={false} mine={mine as unknown as [number, number]} />
+                )}
+                {!results.pins && <p class="muted small">The host is keeping other people's pins hidden for now.</p>}
+                <button class="btn ghost sm" style={{ marginTop: 10 }} onClick={() => setMovingPin(true)}>
+                  Move my pin
+                </button>
+              </>
+            )
+          ) : (
+            <ResultsView poll={poll} results={results} code={code} />
+          )}
         </div>
       )}
     </div>

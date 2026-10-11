@@ -30,6 +30,9 @@ export function Present({ code }: { code: string }) {
   if (status === "not-found") return <ConnProblem status={status} code={code} />;
 
   const poll = s ? activePoll(s) : undefined;
+  // ?room=ID shows one room's questions, for events with a screen per room.
+  const roomParam = new URLSearchParams(location.search).get("room");
+  const room = s?.meta.rooms.find((r) => r.id === roomParam);
   const mode = !s ? "code" : s.meta.presentMode === "auto" ? (poll ? "poll" : "qa") : s.meta.presentMode;
   const host = location.host;
 
@@ -76,14 +79,17 @@ export function Present({ code }: { code: string }) {
     );
   } else if (s && mode === "qa") {
     const qs = sortQuestions(
-      s.questions.filter((q) => q.status === "live"),
+      s.questions.filter((q) => q.status === "live" && (!room || q.room === room.id)),
       "popular",
     );
     const hl = qs.find((q) => q.highlighted);
     const rest = qs.filter((q) => !q.highlighted).slice(0, hl ? 3 : 6);
     stage = (
       <>
-        <div class="stage-label">{s.meta.title}</div>
+        <div class="stage-label">
+          {s.meta.title}
+          {room && <span class="tag live">{room.name}</span>}
+        </div>
         {hl && (
           <div class="now-answering" style={{ marginTop: "2vh" }}>
             <span class="tag hl">Now answering</span>
@@ -131,7 +137,7 @@ export function Present({ code }: { code: string }) {
   return (
     <div class="present">
       <aside>
-        <Brand />
+        <Brand logo={s?.meta.settings.logo} code={code} />
         <div>
           <div class="join-at">Join at</div>
           <div class="join-host">{host}</div>

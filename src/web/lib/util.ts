@@ -71,7 +71,8 @@ export function ago(ts: number): string {
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return new Date(ts).toLocaleDateString();
 }
-export const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const IRREGULAR: Record<string, string> = { person: "people" };
+export const plural = (n: number, w: string) => `${n} ${n === 1 ? w : (IRREGULAR[w] ?? `${w}s`)}`;
 export const joinUrl = (code: string) => `${location.origin}/e/${code}`;
 export const normCode = (c: string) => c.toUpperCase().replace(/[^A-Z0-9]/g, "");
 

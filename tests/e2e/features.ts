@@ -65,7 +65,7 @@ host.send({ type: "setLabels", labels: [{ name: "Finance", color: "green" }, { n
 ok(await mod.until(() => mod.snap.meta.labels.length === 2), "host makes labels (duplicates dropped)");
 const fin = mod.snap.meta.labels.find((l) => l.name === "Finance")!;
 mod.send({ type: "tagQuestion", id: pq.id, label: fin.id });
-ok(await a.until(() => a.snap.questions.find((q) => q.id === pq.id)?.labels.includes(fin.id)), "moderator tags a question; attendees see the label");
+ok(await a.until(() => !!a.snap.questions.find((q) => q.id === pq.id)?.labels.includes(fin.id)), "moderator tags a question; attendees see the label");
 host.send({ type: "setLabels", labels: mod.snap.meta.labels.filter((l) => l.id !== fin.id) });
 ok(await a.until(() => a.snap.questions.find((q) => q.id === pq.id)?.labels.length === 0), "deleting a label removes it from questions");
 

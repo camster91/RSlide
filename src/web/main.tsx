@@ -19,6 +19,7 @@ function lazy<P extends object>(load: () => Promise<ComponentType<P>>): Componen
 const Host = lazy(() => import("./views/Host").then((m) => m.Host));
 const Present = lazy(() => import("./views/Present").then((m) => m.Present));
 const Report = lazy(() => import("./views/Report").then((m) => m.Report));
+const Analytics = lazy(() => import("./views/Analytics").then((m) => m.Analytics));
 
 function Router() {
   const path = useLocation();
@@ -26,6 +27,8 @@ function Router() {
   const code = normCode(b);
   if (a === "e" && code) return <Attendee key={code} code={code} />;
   if (a === "host" && code) return <Host key={code} code={code} />;
+  if (a === "mod" && code) return <Host key={`mod-${code}`} code={code} moderator />;
+  if (a === "analytics" && code) return <Analytics key={code} code={code} />;
   if (a === "present" && code) return <Present key={code} code={code} />;
   if (a === "report" && code) return <Report key={code} code={code} />;
   // Short links like yoursite.com/ABC123

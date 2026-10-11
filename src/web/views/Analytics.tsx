@@ -1,0 +1,266 @@
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import type { Analytics as Data } from "../../shared/protocol";
+import { CFG, plural, useTheme, useTitle } from "../lib/util";
+import { Brand, Empty, Message, TYPE_LABEL } from "../components/ui";
+
+type Bucket = Data["timeline"][number];
+
+/** Joins empty minutes and groups long events into bigger buckets, so the chart stays readable. */
+function buckets(timeline: Bucket[]): { size: number; rows: Bucket[] } {
+  if (!timeline.length) return { size: 1, rows: [] };
+  const first = timeline[0].t;
+  const last = timeline[timeline.length - 1].t;
+  const minutes = Math.round((last - first) / 60_000) + 1;
+  const size = [1, 2, 5, 10, 15, 30, 60, 120, 240, 1440].find((m) => minutes / m <= 90) ?? 1440;
+  const step = size * 60_000;
+  const start = Math.floor(first / step) * step;
+  const rows: Bucket[] = [];
+  for (let t = start; t <= last; t += step) rows.push({ t, joins: 0, questions: 0, votes: 0, answers: 0, reactions: 0 });
+  for (const b of timeline) {
+    const r = rows[Math.floor((b.t - start) / step)];
+    if (!r) continue;
+    r.joins += b.joins;
+    r.questions += b.questions;
+    r.votes += b.votes;
+    r.answers += b.answers;
+    r.reactions += b.reactions;
+  }
+  return { size, rows };
+}
+const total = (b: Bucket) => b.joins + b.questions + b.votes + b.answers + b.reactions;
+const time = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+function ActivityChart({ timeline }: { timeline: Bucket[] }) {
+  const { size, rows } = useMemo(() => buckets(timeline), [timeline]);
+  const [hover, setHover] = useState<number | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  if (!rows.length) return <Empty>Activity shows here once people join.</Empty>;
+  const W = 720;
+  const H = 220;
+  const padL = 36;
+  const padB = 24;
+  const padT = 12;
+  const max = Math.max(1, ...rows.map(total));
+  const nice = Math.pow(10, Math.floor(Math.log10(max)));
+  const top = Math.ceil(max / nice) * nice;
+  const bw = (W - padL) / rows.length;
+  const y = (v: number) => padT + (H - padB - padT) * (1 - v / top);
+  const ticks = [0, top / 2, top];
+  const labelEvery = Math.ceil(rows.length / 6);
+  const h = hover !== null ? rows[hover] : null;
+  return (
+    <div class="chart" ref={box} onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Actions per ${size === 1 ? "minute" : `${size} minutes`}`}>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line class="gridline" x1={padL} x2={W} y1={y(t)} y2={y(t)} />
+            <text class="axis-text" x={padL - 6} y={y(t) + 4} text-anchor="end">
+              {Math.round(t)}
+            </text>
+          </g>
+        ))}
+        {rows.map((r, i) => {
+          const v = total(r);
+          const x = padL + i * bw;
+          const bh = (H - padB) - y(v);
+          // Keep bars slim even when there are only a few of them.
+          const w = Math.max(1, Math.min(bw - 2, 44));
+          const bx = x + (bw - w) / 2;
+          return (
+            <g key={r.t}>
+              {v > 0 && <path class={`bar-mark ${hover !== null && hover !== i ? "dim" : ""}`} d={`M${bx},${H - padB} v${-Math.max(0, bh - 4)} q0,-4 4,-4 h${Math.max(0, w - 8)} q4,0 4,4 v${Math.max(0, bh - 4)} z`} />}
+              <rect class="hit" x={x} y={0} width={bw} height={H - padB} onMouseEnter={() => setHover(i)} />
+              {i % labelEvery === 0 && (
+                <text class="axis-text" x={x + bw / 2} y={H - 6} text-anchor="middle">
+                  {time(r.t)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {h && hover !== null && (
+        <div class="chart-tip" style={{ left: `${((padL + (hover + 0.5) * bw) / W) * 100}%`, top: `${(y(total(h)) / H) * 100}%` }}>
+          <b>{time(h.t)}</b>
+          <br />
+          {(
+            [
+              ["joined", h.joins],
+              ["question", h.questions],
+              ["vote", h.votes],
+              ["answer", h.answers],
+              ["reaction", h.reactions],
+            ] as [string, number][]
+          )
+            .filter(([, n]) => n)
+            .map(([l, n]) => (
+              <div key={l}>{l === "joined" ? `${n} joined` : plural(n, l)}</div>
+            ))}
+          {!total(h) && <div>No activity</div>}
+        </div>
+      )}
+      <table class="sr-table">
+        <caption>Activity over time</caption>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Joined</th>
+            <th>Questions</th>
+            <th>Votes</th>
+            <th>Answers</th>
+            <th>Reactions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.t}>
+              <td>{time(r.t)}</td>
+              <td>{r.joins}</td>
+              <td>{r.questions}</td>
+              <td>{r.votes}</td>
+              <td>{r.answers}</td>
+              <td>{r.reactions}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p class="muted tiny" style={{ marginTop: 6 }}>
+        Everything people did, per {size === 1 ? "minute" : `${size} minutes`}. Hover a bar for the breakdown.
+      </p>
+    </div>
+  );
+}
+
+function HBar({ label, value, pct, note }: { label: string; value: string; pct: number; note?: string }) {
+  return (
+    <div class="res">
+      <div class="lbl">
+        <span>
+          {label}
+          {note && <span class="muted small">{note}</span>}
+        </span>
+        <b>{value}</b>
+      </div>
+      <div class="track">
+        <div class="fill" style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+export function Analytics({ code }: { code: string }) {
+  const key = decodeURIComponent(location.hash.slice(1));
+  const [data, setData] = useState<Data | null | "forbidden">(null);
+  useTitle(data && data !== "forbidden" ? `Analytics: ${data.title}` : CFG.name);
+  useTheme(undefined);
+  useEffect(() => {
+    let stop = false;
+    const load = () =>
+      fetch(`/api/events/${code}/analytics?key=${encodeURIComponent(key)}`)
+        .then((r) => (r.status === 403 || r.status === 404 ? "forbidden" : r.json()))
+        .then((d) => !stop && setData(d))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 30_000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, [code, key]);
+
+  if (data === "forbidden" || !key) return <Message title="Host link needed">Open analytics from the host console of your event.</Message>;
+  if (!data) return <div class="report muted">Loading…</div>;
+  const p = Math.max(1, data.participants);
+  const answered = data.polls.reduce((n, x) => n + x.responses, 0);
+
+  return (
+    <div class="report">
+      <div class="spread" style={{ marginBottom: 24 }}>
+        <Brand />
+        <a class="btn ghost sm" href={`/host/${code}#${key}`}>
+          Back to host console
+        </a>
+      </div>
+      <p class="muted">Analytics, code {code}. Updates every 30 seconds.</p>
+      <h1>{data.title}</h1>
+
+      <section class="stats-row" style={{ marginTop: 20 }}>
+        <div class="stat">
+          <b>{data.participants}</b>
+          <span>people joined</span>
+        </div>
+        <div class="stat">
+          <b>{data.peakOnline}</b>
+          <span>most online at once{data.peakAt ? `, at ${time(data.peakAt)}` : ""}</span>
+        </div>
+        <div class="stat">
+          <b>{data.questions}</b>
+          <span>
+            {data.questions === 1 ? "question" : "questions"} from {plural(data.askers, "person")} ({Math.round((data.askers / p) * 100)}% of people)
+          </span>
+        </div>
+        <div class="stat">
+          <b>{answered}</b>
+          <span>poll answers</span>
+        </div>
+        <div class="stat">
+          <b>{data.votes}</b>
+          <span>votes on questions</span>
+        </div>
+        <div class="stat">
+          <b>{data.reactions}</b>
+          <span>reactions</span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Activity over time</h2>
+        <div style={{ marginTop: 14 }}>
+          <ActivityChart timeline={data.timeline} />
+        </div>
+      </section>
+
+      <section>
+        <h2>Poll response rate</h2>
+        <p class="muted small" style={{ margin: "4px 0 14px" }}>
+          Share of everyone who joined that answered each poll.
+        </p>
+        {data.polls.length ? (
+          data.polls.map((x) => <HBar key={x.id} label={x.title} note={` · ${TYPE_LABEL[x.type]}`} value={`${Math.round((x.responses / p) * 100)}% (${x.responses})`} pct={(x.responses / p) * 100} />)
+        ) : (
+          <Empty>No polls have been launched yet.</Empty>
+        )}
+      </section>
+
+      <section>
+        <h2>Top questions</h2>
+        {data.topQuestions.length ? (
+          <ol style={{ paddingLeft: 22 }}>
+            {data.topQuestions.map((q, i) => (
+              <li key={i} style={{ margin: "10px 0" }}>
+                {q.text}
+                <div class="muted small">
+                  Score {q.score}
+                  {q.status === "answered" ? ", answered" : ""}
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <Empty>No questions yet.</Empty>
+        )}
+      </section>
+
+      {data.rooms.length > 1 && (
+        <section>
+          <h2>Questions by room</h2>
+          <div style={{ marginTop: 14 }}>
+            {data.rooms.map((r) => (
+              <HBar key={r.name} label={r.name} value={String(r.questions)} pct={(r.questions / Math.max(1, data.questions)) * 100} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}

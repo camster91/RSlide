@@ -1,9 +1,28 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { ITEM_TYPES, THEMES, type ClientMsg, type ItemDraft, type ItemType, type Poll, type PollDraft, type PollType, type Question, type Settings, type ThemeName } from "../../shared/protocol";
+import {
+  ITEM_TYPES,
+  LABEL_COLORS,
+  MAIN_ROOM,
+  THEMES,
+  type ClientMsg,
+  type ItemDraft,
+  type ItemType,
+  type Label,
+  type LabelColor,
+  type Meta,
+  type Poll,
+  type PollDraft,
+  type PollType,
+  type Question,
+  type Room,
+  type Settings,
+  type ThemeName,
+} from "../../shared/protocol";
 import { resultsOf, sortQuestions } from "../../shared/store";
+import { TEMPLATES } from "../../shared/templates";
 import { useRoom, type Send } from "../lib/room";
-import { CFG, joinUrl, mediaUrl, rememberHosted, toast, uploadImage, useTheme, useTitle } from "../lib/util";
-import { Board, ConnProblem, Countdown, Empty, Icon, Podium, QuestionMeta, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount } from "../components/ui";
+import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, toast, uploadImage, useTheme, useTitle } from "../lib/util";
+import { Board, ConnProblem, Countdown, Empty, Icon, LabelChip, Podium, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
 
 type QTab = "live" | "pending" | "answered" | "archived";
 const Q_TABS: [QTab, string][] = [
@@ -26,45 +45,126 @@ const THEME_SWATCH: Record<ThemeName, [string, string, string]> = {
   mono: ["#24242e", "#ffd400", "Mono"],
   contrast: ["#0000b3", "#ffe600", "High contrast"],
 };
+type ModAction = "approve" | "answer" | "archive" | "highlight" | "deleteQuestion";
 
-export function Host({ code }: { code: string }) {
+const copy = (txt: string, msg: string) =>
+  navigator.clipboard?.writeText(txt).then(
+    () => toast(msg),
+    () => prompt("Copy this link:", txt),
+  );
+
+/** The host console. With `moderator`, only the Q&A tools are shown. */
+export function Host({ code, moderator = false }: { code: string; moderator?: boolean }) {
   const key = decodeURIComponent(location.hash.slice(1));
   const [reactions, setReactions] = useState(0);
-  const { state, status, send } = useRoom(code, "host", { key, onReactions: (c) => setReactions((n) => n + Object.values(c).reduce((a, b) => a + (b ?? 0), 0)) });
+  const { state, status, send } = useRoom(code, moderator ? "mod" : "host", {
+    key,
+    onReactions: (c) => setReactions((n) => n + Object.values(c).reduce((a, b) => a + (b ?? 0), 0)),
+  });
   const [qTab, setQTab] = useState<QTab>("live");
+  const [roomFilter, setRoomFilter] = useState<string>("all");
+  const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [editing, setEditing] = useState<PollDraft | null>(null);
   const [drawer, setDrawer] = useState(false);
+  const [templates, setTemplates] = useState(false);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const s = state.snapshot;
-  useTitle(s ? `Host: ${s.meta.title}` : CFG.name);
+  useTitle(s ? `${moderator ? "Moderate" : "Host"}: ${s.meta.title}` : CFG.name);
   useTheme(s?.meta.settings.theme);
   useEffect(() => {
-    if (s) rememberHosted({ code, key, title: s.meta.title, ts: Date.now() });
+    if (s && !moderator) rememberHosted({ code, key, title: s.meta.title, ts: Date.now() });
   }, [!!s]);
 
   if (!key || status === "forbidden") return <ConnProblem status="forbidden" code={code} />;
   if (status === "not-found") return <ConnProblem status={status} code={code} />;
 
-  const copy = (txt: string, msg: string) =>
-    navigator.clipboard?.writeText(txt).then(
-      () => toast(msg),
-      () => prompt("Copy this link:", txt),
-    );
-
+  const meta = s?.meta;
+  const rooms = meta?.rooms ?? [];
+  const labels = meta?.labels ?? [];
+  const inFilter = (q: Question) => (roomFilter === "all" || q.room === roomFilter) && (!labelFilter || q.labels.includes(labelFilter));
   const by: Record<QTab, Question[]> = { live: [], pending: [], answered: [], archived: [] };
-  s?.questions.forEach((q) => by[q.status].push(q));
-  const showReview = !!s && (s.meta.settings.moderation || by.pending.length > 0);
+  s?.questions.filter(inFilter).forEach((q) => by[q.status].push(q));
+  const showReview = !!s && (s.meta.settings.moderation || s.meta.settings.profanity === "review" || by.pending.length > 0);
   const tab = qTab === "pending" && !showReview ? "live" : qTab;
   const list = sortQuestions(by[tab], "popular");
-  const qAct = (type: "approve" | "answer" | "archive" | "highlight" | "deleteQuestion", id: string) => {
+  const act = (type: ModAction, id: string) => {
     if (type === "deleteQuestion" && !confirm("Delete this question for everyone?")) return;
     send({ type, id });
   };
-  const settings = s?.meta.settings;
+  const settings = meta?.settings;
+
+  const qaPanel = (
+    <section class="panel stack">
+      <div class="section-title">
+        <h2>Q&amp;A</h2>
+        {settings && !moderator && (
+          <label class="check small">
+            <input type="checkbox" checked={settings.qaOpen} onChange={(e) => send({ type: "setSettings", settings: { qaOpen: e.currentTarget.checked } })} />
+            Taking questions
+          </label>
+        )}
+      </div>
+      {settings?.qaOpensAt && !settings.qaOpen && <p class="notice">Opens by itself at {whenText(settings.qaOpensAt)}.</p>}
+      {settings?.qaClosesAt && settings.qaOpen && <p class="notice">Closes by itself at {whenText(settings.qaClosesAt)}.</p>}
+      {rooms.length > 1 && (
+        <div class="room-tabs" role="group" aria-label="Filter by room">
+          <button aria-pressed={roomFilter === "all"} onClick={() => setRoomFilter("all")}>
+            All rooms
+          </button>
+          {rooms.map((r) => (
+            <button key={r.id} aria-pressed={roomFilter === r.id} onClick={() => setRoomFilter(r.id)}>
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {labels.length > 0 && (
+        <div class="filters" role="group" aria-label="Filter by label">
+          <span class="muted small">Label:</span>
+          {labels.map((l) => (
+            <LabelChip key={l.id} label={l} on={labelFilter === l.id ? true : labelFilter ? false : undefined} onClick={() => setLabelFilter(labelFilter === l.id ? null : l.id)} />
+          ))}
+        </div>
+      )}
+      <div class="tabs" role="tablist">
+        {Q_TABS.filter(([k]) => k !== "pending" || showReview).map(([k, label]) => (
+          <button key={k} class="tab" role="tab" aria-selected={tab === k} onClick={() => setQTab(k)}>
+            {label}
+            {by[k].length > 0 && <span class={`count ${k === "pending" ? "hot" : ""}`}>{by[k].length}</span>}
+          </button>
+        ))}
+      </div>
+      {list.length ? (
+        <div class="q-list">
+          {list.map((q) => (
+            <HostQuestion key={q.id} q={q} act={act} send={send} labels={labels} rooms={rooms} />
+          ))}
+        </div>
+      ) : (
+        <Empty title={s ? EMPTY_TEXT[tab][0] : "Connecting…"}>{s ? EMPTY_TEXT[tab][1] : null}</Empty>
+      )}
+    </section>
+  );
+
+  if (moderator)
+    return (
+      <>
+        <TopBar title={s ? `Moderating: ${s.meta.title}` : "Connecting…"} logo={settings?.logo} code={code}>
+          <span class="chip">
+            <span class={`dot ${status === "online" ? "" : "off"}`} />
+            <span class="num">{s?.online ?? 0}</span> online
+          </span>
+        </TopBar>
+        <main class="wrap stack" style={{ maxWidth: 820 }}>
+          <p class="muted small">You're a moderator. You can approve, label, reply to and highlight questions.</p>
+          {qaPanel}
+        </main>
+      </>
+    );
 
   return (
     <>
-      <TopBar title={s?.meta.title}>
+      <TopBar title={s?.meta.title} logo={settings?.logo} code={code}>
         <span class="chip" title="Attendees connected now">
           <span class={`dot ${status === "online" ? "" : "off"}`} />
           <span class="num">{s?.online ?? 0}</span> online
@@ -97,9 +197,9 @@ export function Host({ code }: { code: string }) {
             Join at <b>{location.host}</b> with code
           </span>
           <span class="code">{code}</span>
-          {s?.meta.passcode && (
+          {meta?.passcode && (
             <span class="chip" style={{ background: "rgba(255,255,255,.18)", color: "inherit" }}>
-              Passcode: {s.meta.passcode}
+              Passcode: {meta.passcode}
             </span>
           )}
           <span class="grow" />
@@ -112,39 +212,15 @@ export function Host({ code }: { code: string }) {
         </div>
 
         <div class="grid-host">
-          <section class="panel stack">
-            <div class="section-title">
-              <h2>Q&amp;A</h2>
-              {settings && (
-                <label class="check small">
-                  <input type="checkbox" checked={settings.qaOpen} onChange={(e) => send({ type: "setSettings", settings: { qaOpen: e.currentTarget.checked } })} />
-                  Taking questions
-                </label>
-              )}
-            </div>
-            <div class="tabs" role="tablist">
-              {Q_TABS.filter(([k]) => k !== "pending" || showReview).map(([k, label]) => (
-                <button key={k} class="tab" role="tab" aria-selected={tab === k} onClick={() => setQTab(k)}>
-                  {label}
-                  {by[k].length > 0 && <span class={`count ${k === "pending" ? "hot" : ""}`}>{by[k].length}</span>}
-                </button>
-              ))}
-            </div>
-            {list.length ? (
-              <div class="q-list">
-                {list.map((q) => (
-                  <HostQuestion key={q.id} q={q} act={qAct} />
-                ))}
-              </div>
-            ) : (
-              <Empty title={s ? EMPTY_TEXT[tab][0] : "Connecting…"}>{s ? EMPTY_TEXT[tab][1] : null}</Empty>
-            )}
-          </section>
+          {qaPanel}
 
           <section class="stack">
             <div class="panel stack">
               <div class="section-title">
                 <h2>Polls</h2>
+                <button class="btn sm ghost" onClick={() => setTemplates(true)}>
+                  Templates
+                </button>
                 <button class="btn sm" onClick={() => setEditing(newDraft("multiple"))}>
                   New poll
                 </button>
@@ -179,7 +255,15 @@ export function Host({ code }: { code: string }) {
                   ))}
                 </div>
               ) : (
-                !editing && <Empty title="No polls yet">Make a few before you start, then launch them one at a time.</Empty>
+                !editing && (
+                  <Empty title="No polls yet">
+                    Make a few before you start, or{" "}
+                    <button class="link-btn" onClick={() => setTemplates(true)}>
+                      start from a template
+                    </button>
+                    .
+                  </Empty>
+                )
               )}
             </div>
 
@@ -187,7 +271,10 @@ export function Host({ code }: { code: string }) {
               <div class="panel stack">
                 <div class="section-title">
                   <h2>Quiz leaderboard</h2>
-                  <button class={`btn sm ${s.meta.presentMode === "leaderboard" ? "on" : "ghost"}`} onClick={() => send({ type: "setPresentMode", mode: s.meta.presentMode === "leaderboard" ? "auto" : "leaderboard" })}>
+                  <button
+                    class={`btn sm ${s.meta.presentMode === "leaderboard" ? "on" : "ghost"}`}
+                    onClick={() => send({ type: "setPresentMode", mode: s.meta.presentMode === "leaderboard" ? "auto" : "leaderboard" })}
+                  >
                     {s.meta.presentMode === "leaderboard" ? "On big screen" : "Show on big screen"}
                   </button>
                 </div>
@@ -205,7 +292,17 @@ export function Host({ code }: { code: string }) {
         </div>
       </main>
 
-      {drawer && s && <SettingsDrawer settings={s.meta.settings} passcode={s.meta.passcode ?? ""} presentMode={s.meta.presentMode} send={send} onClose={() => setDrawer(false)} />}
+      {drawer && meta && <SettingsDrawer code={code} hostKey={key} meta={meta} send={send} onClose={() => setDrawer(false)} />}
+      {templates && (
+        <TemplateGallery
+          onClose={() => setTemplates(false)}
+          onPick={(polls) => {
+            send({ type: "importPolls", polls });
+            setTemplates(false);
+            toast(`Added ${polls.length} polls`);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -214,6 +311,7 @@ export function Host({ code }: { code: string }) {
 
 function ExportMenu({ code, hostKey }: { code: string; hostKey: string }) {
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -222,31 +320,86 @@ function ExportMenu({ code, hostKey }: { code: string; hostKey: string }) {
     return () => document.removeEventListener("click", close);
   }, [open]);
   const k = encodeURIComponent(hostKey);
+  const duplicate = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ from: { code, key: hostKey } }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      rememberHosted({ code: d.code, key: d.hostKey, title: d.title, ts: Date.now() });
+      toast("Copy made. You're now in the new event.");
+      navigate(`/host/${d.code}#${d.hostKey}`);
+    } catch (e) {
+      toast((e as Error).message || "Couldn't copy the event");
+    }
+    setBusy(false);
+    setOpen(false);
+  };
   return (
     <div class="menu" ref={ref}>
       <button class="btn sm ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
-        Export
+        Results
       </button>
       {open && (
         <div class="menu-list" role="menu">
-          <a role="menuitem" href={`/api/events/${code}/export?format=xlsx&key=${k}`} download>
-            Excel workbook (.xlsx)
-          </a>
-          <a role="menuitem" href={`/api/events/${code}/export?key=${k}`} download>
-            CSV file
+          <a role="menuitem" href={`/analytics/${code}#${hostKey}`} target="_blank" rel="noopener">
+            Analytics
           </a>
           <a role="menuitem" href={`/report/${code}#${hostKey}`} target="_blank" rel="noopener">
             Report to print or save as PDF
           </a>
+          <a role="menuitem" href={`/api/events/${code}/export?format=xlsx&key=${k}`} download>
+            Download Excel (.xlsx)
+          </a>
+          <a role="menuitem" href={`/api/events/${code}/export?key=${k}`} download>
+            Download CSV
+          </a>
+          <button role="menuitem" onClick={duplicate} disabled={busy}>
+            {busy ? "Copying…" : "Copy this event (polls and settings)"}
+          </button>
         </div>
       )}
     </div>
   );
 }
 
+// ---------- templates ----------
+
+function TemplateGallery({ onClose, onPick }: { onClose: () => void; onPick: (polls: PollDraft[]) => void }) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, []);
+  return (
+    <>
+      <div class="drawer-backdrop" onClick={onClose} />
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Poll templates">
+        <div class="spread">
+          <h2>Add polls from a template</h2>
+          <button class="btn sm quiet" onClick={onClose} aria-label="Close">
+            <Icon.x />
+          </button>
+        </div>
+        <p class="muted small">The polls are added to the end of your list. You can edit them before you launch.</p>
+        <div class="tpl-grid">
+          {TEMPLATES.map((t) => (
+            <button key={t.id} class="tpl" onClick={() => onPick(t.polls)}>
+              <b>{t.name}</b>
+              <small>{t.description}</small>
+              <span class="count">{plural(t.polls.length, "poll")}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ---------- settings ----------
 
-type ToggleKey = "qaOpen" | "moderation" | "allowAnonymous" | "allowDownvotes" | "reactions";
+type ToggleKey = "qaOpen" | "moderation" | "allowAnonymous" | "allowDownvotes" | "reactions" | "audienceReplies" | "hideNames";
 function SettingToggle({ k, label, hint, settings, set }: { k: ToggleKey; label: string; hint?: string; settings: Settings; set: (p: Partial<Settings>) => void }) {
   return (
     <label class="toggle">
@@ -263,8 +416,20 @@ function SettingToggle({ k, label, hint, settings, set }: { k: ToggleKey; label:
   );
 }
 
-function SettingsDrawer({ settings, passcode, presentMode, send, onClose }: { settings: Settings; passcode: string; presentMode: string; send: Send; onClose: () => void }) {
-  const [pass, setPass] = useState(passcode);
+/** `datetime-local` works in local time, without seconds. */
+const toLocalInput = (ts: number | null) => {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
+const fromLocalInput = (v: string) => (v ? new Date(v).getTime() : null);
+
+function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; hostKey: string; meta: Meta; send: Send; onClose: () => void }) {
+  const settings = meta.settings;
+  const [pass, setPass] = useState(meta.passcode ?? "");
+  const [words, setWords] = useState(settings.blockedWords.join(", "));
+  const [uploading, setUploading] = useState(false);
+  const logoRef = useRef<HTMLInputElement>(null);
   const set = (patch: Partial<Settings>) => send({ type: "setSettings", settings: patch });
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -272,6 +437,9 @@ function SettingsDrawer({ settings, passcode, presentMode, send, onClose }: { se
     return () => window.removeEventListener("keydown", esc);
   }, []);
   const Toggle = (p: { k: ToggleKey; label: string; hint?: string }) => <SettingToggle {...p} settings={settings} set={set} />;
+  const modUrl = `${location.origin}/mod/${code}#${meta.modKey ?? ""}`;
+  const deleteIn = (days: number | null) => set({ deleteAt: days ? Date.now() + days * 86_400_000 : null });
+
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
@@ -288,12 +456,78 @@ function SettingsDrawer({ settings, passcode, presentMode, send, onClose }: { se
         {Toggle({ k: "moderation", label: "Review questions first", hint: "New questions stay hidden until you approve them." })}
         {Toggle({ k: "allowAnonymous", label: "Allow anonymous questions" })}
         {Toggle({ k: "allowDownvotes", label: "Allow downvotes" })}
+        {Toggle({ k: "audienceReplies", label: "Let attendees reply", hint: "You and your moderators can always reply." })}
+        {Toggle({ k: "hideNames", label: "Hide names from the audience", hint: "Only you and moderators see who asked." })}
+
+        <p class="label">Open and close questions automatically</p>
+        <div class="row">
+          <label class="small grow">
+            Opens
+            <input
+              class="input"
+              type="datetime-local"
+              value={toLocalInput(settings.qaOpensAt)}
+              onChange={(e) => {
+                const t = fromLocalInput(e.currentTarget.value);
+                set(t && t > Date.now() ? { qaOpensAt: t, qaOpen: false } : { qaOpensAt: null });
+              }}
+            />
+          </label>
+          <label class="small grow">
+            Closes
+            <input class="input" type="datetime-local" value={toLocalInput(settings.qaClosesAt)} onChange={(e) => set({ qaClosesAt: fromLocalInput(e.currentTarget.value) })} />
+          </label>
+        </div>
+        <p class="muted tiny" style={{ marginTop: 6 }}>
+          Leave empty to open and close by hand.
+        </p>
+
+        <h3>Word filter</h3>
+        <div class="seg" role="group" aria-label="Word filter">
+          {(
+            [
+              ["off", "Off"],
+              ["mask", "Hide bad words"],
+              ["review", "Send to review"],
+            ] as const
+          ).map(([v, l]) => (
+            <button key={v} aria-pressed={settings.profanity === v} onClick={() => set({ profanity: v })}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <p class="muted tiny" style={{ marginTop: 6 }}>
+          {settings.profanity === "review" ? "Questions with filtered words wait for your review. The audience sees them with the words hidden." : "Covers common swear words, plus your own list."}
+        </p>
+        {settings.profanity !== "off" && (
+          <form
+            class="stack-sm"
+            style={{ marginTop: 8 }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              set({ blockedWords: words.split(/[\n,]/) as unknown as string[] });
+              toast("Word list saved");
+            }}
+          >
+            <label class="label" for="bw" style={{ marginTop: 0 }}>
+              Your own words to filter
+            </label>
+            <textarea id="bw" class="input" placeholder="e.g. competitor names, spoilers" value={words} onInput={(e) => setWords(e.currentTarget.value)} />
+            <button class="btn sm">Save words</button>
+          </form>
+        )}
+
+        <h3>Labels</h3>
+        <p class="muted tiny">Tag questions to sort them, e.g. by topic. Everyone sees the labels.</p>
+        <LabelsEditor labels={meta.labels} onSave={(labels) => send({ type: "setLabels", labels })} />
+
+        <h3>Rooms</h3>
+        <p class="muted tiny">Split Q&amp;A into separate rooms, e.g. one per session or track. Attendees pick a room.</p>
+        <RoomsEditor rooms={meta.rooms} code={code} hostKey={hostKey} onSave={(rooms) => send({ type: "setRooms", rooms })} />
 
         <h3>Audience</h3>
         {Toggle({ k: "reactions", label: "Emoji reactions", hint: "People can send 👏 ❤️ 🔥 to the big screen." })}
-        <p class="label" style={{ marginTop: 14 }}>
-          Ask people for
-        </p>
+        <p class="label">Ask people for</p>
         <div class="seg" role="group" aria-label="What attendees must enter">
           {(
             [
@@ -316,7 +550,7 @@ function SettingsDrawer({ settings, passcode, presentMode, send, onClose }: { se
             toast(pass.trim() ? "Passcode set" : "Passcode removed");
           }}
         >
-          <label class="label" for="pc">
+          <label class="label" for="pc" style={{ marginTop: 0 }}>
             Passcode
           </label>
           <div class="row nowrap">
@@ -326,8 +560,49 @@ function SettingsDrawer({ settings, passcode, presentMode, send, onClose }: { se
           <p class="muted tiny">People who join with the code must also type this. Leave empty for no passcode.</p>
         </form>
 
+        <h3>Moderators</h3>
+        <p class="muted tiny">Moderators can review, label, reply to and highlight questions. They can't change polls or settings.</p>
+        <div class="mod-link" style={{ marginTop: 8 }}>
+          <input class="input" readOnly value={modUrl} aria-label="Moderator link" onFocus={(e) => e.currentTarget.select()} />
+          <button class="btn sm" onClick={() => copy(modUrl, "Moderator link copied")}>
+            Copy
+          </button>
+        </div>
+        <button class="btn sm ghost" style={{ marginTop: 8 }} onClick={() => confirm("Make a new moderator link? The old link stops working and anyone using it is signed out.") && send({ type: "newModKey" })}>
+          Make a new link
+        </button>
+
         <h3>Look</h3>
-        <div class="themes" role="group" aria-label="Colour theme">
+        <div class="logo-pick">
+          {settings.logo ? <img src={mediaUrl(code, settings.logo)} alt="Event logo" /> : <span class="muted small">No logo</span>}
+          <input
+            ref={logoRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            hidden
+            onChange={async (e) => {
+              const file = e.currentTarget.files?.[0];
+              e.currentTarget.value = "";
+              if (!file) return;
+              setUploading(true);
+              try {
+                set({ logo: await uploadImage(code, hostKey, file) });
+              } catch (err) {
+                toast((err as Error).message);
+              }
+              setUploading(false);
+            }}
+          />
+          <button class="btn sm ghost" onClick={() => logoRef.current?.click()} disabled={uploading}>
+            {uploading ? "Uploading…" : settings.logo ? "Change logo" : "Add logo"}
+          </button>
+          {settings.logo && (
+            <button class="btn sm quiet" onClick={() => set({ logo: null })}>
+              Remove
+            </button>
+          )}
+        </div>
+        <div class="themes" role="group" aria-label="Colour theme" style={{ marginTop: 14 }}>
           {THEMES.map((t) => (
             <button key={t} aria-pressed={settings.theme === t} onClick={() => set({ theme: t })}>
               <span class="swatch">
@@ -338,9 +613,7 @@ function SettingsDrawer({ settings, passcode, presentMode, send, onClose }: { se
             </button>
           ))}
         </div>
-        <p class="label" style={{ marginTop: 16 }}>
-          Big screen
-        </p>
+        <p class="label">Big screen</p>
         <div class="seg" role="group" aria-label="Big screen light or dark">
           {(["light", "dark"] as const).map((v) => (
             <button key={v} aria-pressed={settings.screen === v} onClick={() => set({ screen: v })}>
@@ -348,9 +621,7 @@ function SettingsDrawer({ settings, passcode, presentMode, send, onClose }: { se
             </button>
           ))}
         </div>
-        <p class="label" style={{ marginTop: 16 }}>
-          Big screen shows
-        </p>
+        <p class="label">Big screen shows</p>
         <div class="seg" role="group" aria-label="What the big screen shows" style={{ flexWrap: "wrap" }}>
           {(
             [
@@ -361,7 +632,7 @@ function SettingsDrawer({ settings, passcode, presentMode, send, onClose }: { se
               ["code", "Join code"],
             ] as const
           ).map(([m, l]) => (
-            <button key={m} aria-pressed={presentMode === m} onClick={() => send({ type: "setPresentMode", mode: m })}>
+            <button key={m} aria-pressed={meta.presentMode === m} onClick={() => send({ type: "setPresentMode", mode: m })}>
               {l}
             </button>
           ))}
@@ -369,14 +640,124 @@ function SettingsDrawer({ settings, passcode, presentMode, send, onClose }: { se
         <p class="muted tiny" style={{ marginTop: 8 }}>
           Auto shows the live poll when one is running, and questions the rest of the time.
         </p>
+
+        <h3>Privacy</h3>
+        <p class="label" style={{ marginTop: 6 }}>
+          Delete this event automatically
+        </p>
+        <select
+          class="input"
+          aria-label="Delete this event automatically"
+          value=""
+          onChange={(e) => {
+            const v = e.currentTarget.value;
+            if (v === "") return;
+            deleteIn(v === "never" ? null : Number(v));
+          }}
+        >
+          <option value="">{settings.deleteAt ? `On ${new Date(settings.deleteAt).toLocaleString()}` : "Never"}</option>
+          <option value="never">Never</option>
+          <option value="1">1 day from now</option>
+          <option value="7">7 days from now</option>
+          <option value="30">30 days from now</option>
+          <option value="90">90 days from now</option>
+        </select>
+        <p class="muted tiny" style={{ marginTop: 6 }}>
+          Everything is deleted: questions, answers, names and images. Download your results first.
+        </p>
       </div>
     </>
   );
 }
 
+function LabelsEditor({ labels, onSave }: { labels: Label[]; onSave: (l: { id?: string; name: string; color: LabelColor }[]) => void }) {
+  const [list, setList] = useState(labels.map((l) => ({ ...l })));
+  const [name, setName] = useState("");
+  useEffect(() => setList(labels.map((l) => ({ ...l }))), [JSON.stringify(labels)]);
+  const save = (next: typeof list) => {
+    setList(next);
+    onSave(next);
+  };
+  return (
+    <div class="edit-list">
+      {list.map((l, i) => (
+        <div class="row" key={l.id}>
+          <select class="input" aria-label={`Colour for ${l.name}`} value={l.color} onChange={(e) => save(list.map((x, j) => (j === i ? { ...x, color: e.currentTarget.value as LabelColor } : x)))}>
+            {LABEL_COLORS.map((c) => (
+              <option key={c} value={c}>
+                {c[0].toUpperCase() + c.slice(1)}
+              </option>
+            ))}
+          </select>
+          <LabelChip label={l} />
+          <span class="grow" />
+          <button class="btn sm quiet" aria-label={`Delete label ${l.name}`} onClick={() => save(list.filter((_, j) => j !== i))}>
+            <Icon.x />
+          </button>
+        </div>
+      ))}
+      <form
+        class="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!name.trim()) return;
+          save([...list, { id: "", name: name.trim(), color: LABEL_COLORS[list.length % LABEL_COLORS.length] }].map((x) => (x.id ? x : { name: x.name, color: x.color }) as Label));
+          setName("");
+        }}
+      >
+        <input class="input" maxLength={24} placeholder="New label, e.g. Finance" value={name} onInput={(e) => setName(e.currentTarget.value)} />
+        <button class="btn sm">Add</button>
+      </form>
+    </div>
+  );
+}
+
+function RoomsEditor({ rooms, code, hostKey, onSave }: { rooms: Room[]; code: string; hostKey: string; onSave: (r: { id?: string; name: string }[]) => void }) {
+  const current = rooms.length ? rooms : [{ id: MAIN_ROOM, name: "Main" }];
+  const [name, setName] = useState("");
+  return (
+    <div class="edit-list">
+      {rooms.length > 1 &&
+        current.map((r, i) => (
+          <div class="row" key={r.id}>
+            <input class="input" maxLength={40} aria-label="Room name" value={r.name} onChange={(e) => onSave(current.map((x, j) => (j === i ? { ...x, name: e.currentTarget.value } : x)))} />
+            <button class="btn sm ghost" title="Copy a big-screen link that only shows this room" onClick={() => copy(`${location.origin}/present/${code}?room=${r.id}#${hostKey}`, `Big-screen link for ${r.name} copied`)}>
+              Screen link
+            </button>
+            {i > 0 && (
+              <button class="btn sm quiet" aria-label={`Delete room ${r.name}`} onClick={() => confirm(`Delete "${r.name}"? Its questions move to "${current[0].name}".`) && onSave(current.filter((_, j) => j !== i))}>
+                <Icon.x />
+              </button>
+            )}
+          </div>
+        ))}
+      <form
+        class="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!name.trim()) return;
+          onSave([...current, { name: name.trim() }]);
+          setName("");
+        }}
+      >
+        <input class="input" maxLength={40} placeholder={rooms.length > 1 ? "Another room" : "Add a second room, e.g. Workshop"} value={name} onInput={(e) => setName(e.currentTarget.value)} />
+        <button class="btn sm">Add</button>
+      </form>
+      {rooms.length > 1 && (
+        <button class="btn sm quiet" style={{ marginTop: 6 }} onClick={() => confirm("Go back to one room? All questions move to the first room.") && onSave([])}>
+          Use one room
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ---------- questions ----------
 
-function HostQuestion({ q, act }: { q: Question; act: (type: "approve" | "answer" | "archive" | "highlight" | "deleteQuestion", id: string) => void }) {
+function HostQuestion({ q, act, send, labels, rooms }: { q: Question; act: (type: ModAction, id: string) => void; send: Send; labels: Label[]; rooms: Room[] }) {
+  const [replying, setReplying] = useState(false);
+  const [reply, setReply] = useState("");
+  const [tagging, setTagging] = useState(false);
   return (
     <article class={`q ${q.highlighted ? "hl" : ""}`}>
       <VoteCount q={q} />
@@ -388,6 +769,32 @@ function HostQuestion({ q, act }: { q: Question; act: (type: "approve" | "answer
         )}
         <div class="text">{q.text}</div>
         <QuestionMeta q={q} />
+        {(q.labels.length > 0 || tagging) && (
+          <div class="labels">
+            {(tagging ? labels : labels.filter((l) => q.labels.includes(l.id))).map((l) => (
+              <LabelChip key={l.id} label={l} on={tagging ? q.labels.includes(l.id) : undefined} onClick={tagging ? () => send({ type: "tagQuestion", id: q.id, label: l.id }) : undefined} />
+            ))}
+          </div>
+        )}
+        <Replies replies={q.replies} canDelete={() => true} onDelete={(r) => send({ type: "deleteReply", id: q.id, replyId: r.id })} />
+        {replying && (
+          <form
+            class="reply-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!reply.trim()) return toast("Type a reply first");
+              send({ type: "reply", id: q.id, text: reply.trim() });
+              setReply("");
+              setReplying(false);
+            }}
+          >
+            <input class="input" maxLength={300} placeholder="Reply to everyone" aria-label="Your reply" autoFocus value={reply} onInput={(e) => setReply(e.currentTarget.value)} />
+            <button class="btn sm">Send</button>
+            <button type="button" class="btn sm quiet" onClick={() => setReplying(false)}>
+              Cancel
+            </button>
+          </form>
+        )}
         <div class="actions">
           {q.status === "pending" && (
             <button class="btn sm" onClick={() => act("approve", q.id)}>
@@ -404,9 +811,28 @@ function HostQuestion({ q, act }: { q: Question; act: (type: "approve" | "answer
               {q.status === "answered" ? "Mark not answered" : "Mark answered"}
             </button>
           )}
+          {!replying && (
+            <button class="btn sm ghost" onClick={() => setReplying(true)}>
+              Reply
+            </button>
+          )}
+          {labels.length > 0 && (
+            <button class={`btn sm ${tagging ? "on" : "ghost"}`} onClick={() => setTagging(!tagging)}>
+              {tagging ? "Done" : "Label"}
+            </button>
+          )}
           <button class="btn sm ghost" onClick={() => act("archive", q.id)}>
             {q.status === "archived" ? "Restore" : "Archive"}
           </button>
+          {rooms.length > 1 && (
+            <select class="input btn sm ghost" aria-label="Move to room" value={q.room} onChange={(e) => send({ type: "moveQuestion", id: q.id, room: e.currentTarget.value })} style={{ width: "auto" }}>
+              {rooms.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button class="btn sm danger" onClick={() => act("deleteQuestion", q.id)}>
             Delete
           </button>
@@ -415,8 +841,6 @@ function HostQuestion({ q, act }: { q: Question; act: (type: "approve" | "answer
     </article>
   );
 }
-
-// ---------- polls ----------
 
 function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEdit }: {
   code: string;
@@ -497,14 +921,36 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
 
 // ---------- poll editor ----------
 
-const ALL_TYPES: PollType[] = ["multiple", "quiz", "rating", "scale", "ranking", "wordcloud", "open", "survey"];
-const needsOptions = (t: string) => t === "multiple" || t === "quiz" || t === "ranking";
+const ALL_TYPES: PollType[] = ["multiple", "quiz", "rating", "scale", "ranking", "wordcloud", "open", "points", "grid", "pin", "survey"];
+const needsOptions = (t: string) => t === "multiple" || t === "quiz" || t === "ranking" || t === "points" || t === "grid";
+const DEFAULT_AXES: [string, string] = ["Impact", "Effort"];
 
 function newItem(type: ItemType = "multiple"): ItemDraft {
-  return { type, title: "", options: needsOptions(type) ? ["", ""] : [], images: [], multi: false, range: type === "scale" ? { min: 1, max: 10, minLabel: "", maxLabel: "" } : null };
+  return {
+    type,
+    title: "",
+    options: needsOptions(type) ? ["", ""] : [],
+    images: [],
+    multi: false,
+    range: type === "scale" ? { min: 1, max: 10, minLabel: "", maxLabel: "" } : null,
+    axes: type === "grid" ? DEFAULT_AXES : null,
+    image: null,
+  };
 }
 function newDraft(type: PollType): PollDraft {
-  return { type, title: "", options: needsOptions(type) ? ["", ""] : [], images: [], correct: [], multi: false, timeLimit: 20, range: { min: 1, max: 10, minLabel: "", maxLabel: "" }, items: [newItem("rating")] };
+  return {
+    type,
+    title: "",
+    options: needsOptions(type) ? ["", ""] : [],
+    images: [],
+    correct: [],
+    multi: false,
+    timeLimit: 20,
+    range: { min: 1, max: 10, minLabel: "", maxLabel: "" },
+    axes: DEFAULT_AXES,
+    image: null,
+    items: [newItem("rating")],
+  };
 }
 function toDraft(p: Poll): PollDraft {
   return {
@@ -517,7 +963,11 @@ function toDraft(p: Poll): PollDraft {
     multi: p.multi,
     timeLimit: p.timeLimit,
     range: p.range ?? { min: 1, max: 10, minLabel: "", maxLabel: "" },
-    items: p.items.length ? p.items.map((it) => ({ type: it.type as ItemType, title: it.title, options: [...it.options], images: it.images, multi: it.multi, range: it.range })) : [newItem("rating")],
+    axes: p.axes ?? DEFAULT_AXES,
+    image: p.image,
+    items: p.items.length
+      ? p.items.map((it) => ({ type: it.type as ItemType, title: it.title, options: [...it.options], images: it.images, multi: it.multi, range: it.range, axes: it.axes, image: it.image }))
+      : [newItem("rating")],
   };
 }
 
@@ -633,9 +1083,11 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
     if (!d.title.trim()) return toast(d.type === "survey" ? "Give the survey a name" : "Type the question");
     if (needsOptions(d.type) && d.options.filter((o, i) => o.trim() || d.images?.[i]).length < 2) return toast("Add at least 2 options");
     if (d.type === "quiz" && !d.correct.length) return toast("Tick the correct answer");
+    if (d.type === "pin" && !d.image) return toast("Add the picture people will tap on");
     if (d.type === "survey") {
       if (!items.length) return toast("Add a question to the survey");
       if (items.some((it) => !it.title.trim())) return toast("Every survey question needs text");
+      if (items.some((it) => it.type === "pin" && !it.image)) return toast("Add a picture to each pin question");
     }
     onSave({ ...d, items: d.type === "survey" ? items : [] });
   };
@@ -687,6 +1139,9 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
         </label>
       )}
       {d.type === "scale" && <RangeEditor range={d.range} onChange={(range) => set({ range })} />}
+      {d.type === "grid" && <AxesEditor axes={d.axes ?? DEFAULT_AXES} onChange={(axes) => set({ axes })} />}
+      {d.type === "pin" && <ImagePicker code={code} hostKey={hostKey} image={d.image ?? null} onChange={(image) => set({ image })} />}
+      {d.type === "points" && <p class="muted small">Each person shares out 100 points across the options.</p>}
       {d.type === "rating" && <p class="muted small">People rate from 1 to 5 stars.</p>}
       {d.type === "ranking" && <p class="muted small">People put the options in order. The big screen shows the overall order.</p>}
       {d.type === "wordcloud" && <p class="muted small">People send short words. The most popular grow biggest.</p>}
@@ -724,6 +1179,8 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
                 </label>
               )}
               {it.type === "scale" && <RangeEditor range={it.range ?? null} onChange={(range) => setItem(i, { range })} />}
+              {it.type === "grid" && <AxesEditor axes={it.axes ?? DEFAULT_AXES} onChange={(axes) => setItem(i, { axes })} />}
+              {it.type === "pin" && <ImagePicker code={code} hostKey={hostKey} image={it.image ?? null} onChange={(image) => setItem(i, { image })} />}
             </div>
           ))}
           {items.length < 15 && (
@@ -745,3 +1202,57 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
   );
 }
 
+
+function AxesEditor({ axes, onChange }: { axes: [string, string]; onChange: (a: [string, string]) => void }) {
+  return (
+    <div class="row">
+      <label class="small grow">
+        Across (left to right)
+        <input class="input" maxLength={30} value={axes[0]} onInput={(e) => onChange([e.currentTarget.value, axes[1]])} />
+      </label>
+      <label class="small grow">
+        Up (bottom to top)
+        <input class="input" maxLength={30} value={axes[1]} onInput={(e) => onChange([axes[0], e.currentTarget.value])} />
+      </label>
+    </div>
+  );
+}
+
+function ImagePicker({ code, hostKey, image, onChange }: { code: string; hostKey: string; image: string | null; onChange: (id: string | null) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div class="stack-sm">
+      <span class="label">Picture to tap on</span>
+      {image && (
+        <div class="pin-wrap" style={{ maxWidth: 320 }}>
+          <img src={mediaUrl(code, image)} alt="" />
+        </div>
+      )}
+      <input
+        ref={ref}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        hidden
+        onChange={async (e) => {
+          const file = e.currentTarget.files?.[0];
+          e.currentTarget.value = "";
+          if (!file) return;
+          setBusy(true);
+          try {
+            onChange(await uploadImage(code, hostKey, file));
+          } catch (err) {
+            toast((err as Error).message);
+          }
+          setBusy(false);
+        }}
+      />
+      <div class="row">
+        <button type="button" class="btn sm ghost" disabled={busy} onClick={() => ref.current?.click()}>
+          {busy ? "Uploading…" : image ? "Change picture" : "Upload a picture"}
+        </button>
+        <span class="muted tiny">A map, floor plan, chart or photo works well.</span>
+      </div>
+    </div>
+  );
+}

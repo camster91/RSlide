@@ -70,6 +70,11 @@ export function Report({ code }: { code: string }) {
                   {q.name || "Anonymous"}, score {q.votes - q.downs}
                   {q.status === "answered" ? ", answered" : q.status === "archived" ? ", archived" : ""}
                 </div>
+                {q.replies.map((r) => (
+                  <div key={r.id} class="small" style={{ margin: "4px 0 0 12px" }}>
+                    ↳ <b>{r.name || "Anonymous"}:</b> {r.text}
+                  </div>
+                ))}
               </li>
             ))}
           </ol>

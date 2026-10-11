@@ -2,7 +2,7 @@
 
 **Goal:** Everything Slido's Pro plan does, plus the things it doesn't — free, open source (MIT), and deployable in one command.
 
-Last updated: October 2026 · Phases 0 and 1 done (v0.2), except the public demo
+Last updated: October 2026 · Phases 0–2 done (v0.3), except the public demo and host accounts
 
 ---
 
@@ -50,14 +50,14 @@ The two real advantages to protect:
 | Mark answered, archive | Free | ✅ |
 | Moderation (review before publish) | **Pro** | ✅ |
 | 300-character questions | **Pro** | ✅ |
-| Replies to questions (host and audience) | **Pro** | 🔜 P2 |
-| Labels / tags (e.g. "Finance", "Follow-up") | **Pro** | 🔜 P2 |
-| Multiple Q&A rooms in one event | **Pro** | 🔜 P2 |
+| Replies to questions (host and audience) | **Pro** | ✅ |
+| Labels / tags (e.g. "Finance", "Follow-up") | **Pro** | ✅ |
+| Multiple Q&A rooms in one event | **Pro** | ✅ |
 | Edit / withdraw your own question | Free | ✅ |
 | Downvotes (optional) | Free | ✅ |
 | "Similar question already asked" while typing | — | ➕ P3 |
 | AI merges duplicate questions | — | ➕ P3 |
-| Profanity / keyword filter | Pro | 🔜 P2 |
+| Profanity / keyword filter | Pro | ✅ |
 
 ### Polls and quizzes
 | Feature | Slido tier | RSlide |
@@ -74,7 +74,7 @@ The two real advantages to protect:
 | Quiz timer + points for speed | Free/Pro | ✅ |
 | Live leaderboard + podium | **Pro** | ✅ |
 | Team quiz mode | — | ➕ P3 |
-| 2×2 grid, 100-points, pin-on-image (Mentimeter types) | — | ➕ P2 |
+| 2×2 grid, 100-points, pin-on-image (Mentimeter types) | — | ✅ ➕ |
 | Scale / slider poll | — | ✅ ➕ |
 | Emoji reactions that float up on the big screen | — | ✅ ➕ |
 
@@ -85,11 +85,11 @@ The two real advantages to protect:
 | Show/hide results from audience | Free | ✅ |
 | CSV export | Engage | ✅ |
 | Excel + PDF export | Engage | ✅ |
-| Host accounts + event dashboard | Free | 🔜 P2 |
-| Co-hosts and moderators | Engage/Pro | 🔜 P2 |
-| Duplicate an event / reuse polls | Free | ◐ duplicate polls ✅, events P2 |
-| Templates (icebreakers, retros, NPS…) | Free | 🔜 P2 |
-| Event dates, auto-open, auto-close | Free | 🔜 P2 |
+| Host accounts + event dashboard | Free | 🔜 next (needs email) |
+| Co-hosts and moderators | Engage/Pro | ✅ moderator link |
+| Duplicate an event / reuse polls | Free | ✅ |
+| Templates (icebreakers, retros, NPS…) | Free | ✅ |
+| Event dates, auto-open, auto-close | Free | ✅ |
 | Presenter remote (control from your phone) | — | ➕ P3 |
 | Stream overlay for OBS / Zoom (transparent background) | — | ➕ P3 |
 
@@ -97,18 +97,18 @@ The two real advantages to protect:
 | Feature | Slido tier | RSlide |
 | --- | --- | --- |
 | Custom branding (logo, colours) — whole app | **Pro** | ✅ (config file) |
-| Custom branding per event | **Pro** | ◐ theme per event ✅, logo P2 |
+| Custom branding per event | **Pro** | ✅ |
 | Event passcode | Pro | ✅ |
 | Require name or email to join ("verified participants") | Engage | ✅ |
-| Hide participant names from other attendees | **Pro** | 🔜 P2 |
-| Data retention / auto-delete | Enterprise | 🔜 P2 (free for us) |
+| Hide participant names from other attendees | **Pro** | ✅ |
+| Data retention / auto-delete | Enterprise | ✅ (free for us) |
 | SSO for hosts and participants | Enterprise | 🔜 P4 |
 
 ### Analytics and integrations
 | Feature | Slido tier | RSlide |
 | --- | --- | --- |
-| Event analytics (joins, votes, top questions) | Free/Pro | 🔜 P2 |
-| Organization analytics | **Pro** | 🔜 P2 |
+| Event analytics (joins, votes, top questions) | Free/Pro | ✅ |
+| Organization analytics | **Pro** | 🔜 needs accounts |
 | AI recap of the event | — | ➕ P3 |
 | Shareable recap page | — | ➕ P3 |
 | PowerPoint add-in | Free | 🔜 P3 |
@@ -235,16 +235,16 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 - [x] Event passcode; require name or name + email
 - [x] Excel export + printable report (save as PDF)
 
-### Phase 2 — Pro parity (weeks 5–8) → **v0.5**
-- [ ] Host accounts (magic link) + dashboard of events
-- [ ] Co-hosts and moderators
-- [ ] Duplicate events, template gallery
-- [ ] Q&A replies, labels, multiple rooms
-- [ ] Per-event branding (logo, colours, theme)
-- [ ] Hide names, data auto-delete, profanity filter
-- [ ] Event schedule: auto-open / auto-close
-- [ ] Event + organization analytics
-- [ ] Mentimeter-style types: 2×2 grid, 100 points, pin on image
+### Phase 2 — Pro parity (weeks 5–8) → **v0.3** ✅ (except accounts)
+- [ ] Host accounts (magic link) + dashboard of events — *needs an email service; see open decisions*
+- [x] Co-hosts and moderators — *moderator link; share the host link for a full co-host*
+- [x] Duplicate events, template gallery (7 built-in templates)
+- [x] Q&A replies, labels, multiple rooms (with a big-screen link per room)
+- [x] Per-event branding (logo, colours, theme)
+- [x] Hide names, data auto-delete, profanity filter (mask or review, plus custom words)
+- [x] Event schedule: auto-open / auto-close Q&A
+- [x] Event analytics (organization analytics needs accounts)
+- [x] Mentimeter-style types: 2×2 grid, 100 points, pin on image
 
 ### Phase 3 — Beyond Slido (weeks 9–12) → **v1.0**
 - [ ] Smart Q&A (AI dedupe, similar-question hints, translate, moderation assist)
@@ -321,7 +321,7 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 
 ## 11. Open decisions
 
-1. **Front-end stack:** Vite + Preact (recommended — small and familiar) vs staying build-free vanilla JS.
+1. **Email for host sign-in (magic links).** Options: Cloudflare Email Service (needs a domain on Cloudflare), or a provider like Resend or Postmark (needs an API key). Self-hosters without email could sign in with a one-time code shown in the server log.
 2. **Live demo domain:** a free `*.workers.dev` URL vs a custom domain (e.g. `rslide.app`).
 3. **Hosted paid version:** plan for it now (affects account/billing design) or later.
 4. **First AI feature:** duplicate-question merging (recommended — most useful in big rooms) vs paste-to-polls.

@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { CFG, fetchEvent, navigate, normCode, rememberHosted, store, toast, useTheme, useTitle, type HostedEvent } from "../lib/util";
 import { Brand } from "../components/ui";
+import { TEMPLATES } from "../../shared/templates";
 
 export function Home() {
   useTitle(CFG.name);
@@ -9,6 +10,7 @@ export function Home() {
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  const [template, setTemplate] = useState("");
 
   const join = async (e: Event) => {
     e.preventDefault();
@@ -22,7 +24,7 @@ export function Home() {
     e.preventDefault();
     setBusy(true);
     try {
-      const r = await fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
+      const r = await fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, ...(template ? { template } : {}) }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       rememberHosted({ code: d.code, key: d.hostKey, title: d.title, ts: Date.now() });
@@ -73,6 +75,18 @@ export function Home() {
               Event name
             </label>
             <input id="title" class="input" maxLength={120} placeholder={CFG.titlePlaceholder} value={title} onInput={(e) => setTitle(e.currentTarget.value)} style={{ marginTop: 0 }} />
+            <label class="label" for="tpl">
+              Start with
+            </label>
+            <select id="tpl" class="input" value={template} onChange={(e) => setTemplate(e.currentTarget.value)} style={{ marginTop: 0 }}>
+              <option value="">A blank event</option>
+              {TEMPLATES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}: {t.polls.length === 1 ? "1 ready-made poll" : `${t.polls.length} ready-made polls`}
+                </option>
+              ))}
+            </select>
+            {template && <p class="muted tiny">{TEMPLATES.find((t) => t.id === template)?.description}</p>}
             <button class="btn block" disabled={busy}>
               {busy ? "Creating…" : "Create event"}
             </button>

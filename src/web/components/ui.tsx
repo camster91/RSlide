@@ -1,6 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { Item, Leaderboard, Poll, PollType, Question, Reaction, Results as ResultsData } from "../../shared/protocol";
+import type { Item, Label, Leaderboard, Poll, PollType, Question, Reaction, Reply, Results as ResultsData } from "../../shared/protocol";
+import { POINTS_BUDGET } from "../../shared/protocol";
 import { secondsLeft } from "../../shared/store";
 import type { ConnStatus } from "../lib/room";
 import { ago, CFG, mediaUrl, plural } from "../lib/util";
@@ -13,6 +14,9 @@ export const TYPE_LABEL: Record<PollType, string> = {
   ranking: "Ranking",
   wordcloud: "Word cloud",
   open: "Open text",
+  points: "100 points",
+  grid: "2×2 grid",
+  pin: "Pin on image",
   survey: "Survey",
 };
 
@@ -24,6 +28,9 @@ export const TYPE_HINT: Record<PollType, string> = {
   ranking: "Put in order",
   wordcloud: "Short words",
   open: "Free text",
+  points: "Share out points",
+  grid: "Plot on two axes",
+  pin: "Tap a picture",
   survey: "Several questions",
 };
 
@@ -43,11 +50,20 @@ export const Icon = {
   image: () => svg(<><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></>),
   x: () => svg(<path d="M18 6 6 18M6 6l12 12" />),
   smile: () => svg(<><circle cx="12" cy="12" r="9" /><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" /></>),
+  reply: () => svg(<path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />),
+  tag: () => svg(<><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" /><circle cx="7.5" cy="7.5" r="1.5" /></>),
 };
 
 // ---------- chrome ----------
 
-export function Brand() {
+/** The app's brand, or the event's own logo when the host uploaded one. */
+export function Brand({ logo, code }: { logo?: string | null; code?: string }) {
+  if (logo && code)
+    return (
+      <a class="brand" href="/" aria-label={`${CFG.name} home`}>
+        <img class="event-logo" src={mediaUrl(code, logo)} alt="Event logo" />
+      </a>
+    );
   return (
     <a class="brand" href="/" aria-label={`${CFG.name} home`}>
       {CFG.logoUrl ? (
@@ -62,10 +78,10 @@ export function Brand() {
   );
 }
 
-export function TopBar({ title, children }: { title?: string; children?: ComponentChildren }) {
+export function TopBar({ title, children, logo, code }: { title?: string; children?: ComponentChildren; logo?: string | null; code?: string }) {
   return (
     <header class="bar">
-      <Brand />
+      <Brand logo={logo} code={code} />
       <div class="title">{title}</div>
       {children}
     </header>
@@ -185,6 +201,21 @@ function Bar({ label, value, pct, img, lead, correct }: { label: ComponentChildr
 
 function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsData; code: string; big: boolean; correct?: number[] }) {
   const img = (i: number) => (item.images?.[i] ? mediaUrl(code, item.images[i]!) : null);
+  if (item.type === "points" && r.scores) {
+    const order = item.options.map((o, i) => ({ o, i, s: r.scores![i] })).sort((a, b) => b.s - a.s);
+    return (
+      <>
+        {order.map((x, pos) => (
+          <Bar key={x.i} label={x.o} value={`${x.s} pts`} pct={(x.s / POINTS_BUDGET) * 100} img={img(x.i)} lead={pos === 0 && r.total > 0} />
+        ))}
+        <p class="muted tiny" style={{ marginTop: 8 }}>
+          Average points given, out of {POINTS_BUDGET}.
+        </p>
+      </>
+    );
+  }
+  if (item.type === "grid" && r.pairs) return <GridChart item={item} pairs={r.pairs} total={r.total} big={big} />;
+  if (item.type === "pin" && r.pins) return item.image ? <PinMap src={mediaUrl(code, item.image)} pins={r.pins} big={big} /> : null;
   if ((item.type === "multiple" || item.type === "quiz") && r.counts) {
     const denom = Math.max(1, r.total);
     const max = Math.max(...r.counts);
@@ -299,9 +330,11 @@ export function ResultsView({ poll, results, code, big = false }: { poll: Poll; 
   return (
     <>
       <ItemResults item={poll as unknown as Item} r={results} code={code} big={big} correct={poll.type === "quiz" ? poll.correct : undefined} />
-      <p class="muted small" style={{ marginTop: 12 }}>
-        {plural(results.total, "response")}
-      </p>
+      {poll.type !== "grid" && poll.type !== "pin" && (
+        <p class="muted small" style={{ marginTop: 12 }}>
+          {plural(results.total, "response")}
+        </p>
+      )}
     </>
   );
 }
@@ -433,4 +466,127 @@ export function Confetti({ fire }: { fire: unknown }) {
       ))}
     </div>
   );
+}
+
+// ---------- 2×2 grid and pin results ----------
+
+/** Average position of each option on two axes. Names sit next to the dots, so colour isn't needed. */
+export function GridChart({ item, pairs, total, big }: { item: Item; pairs: [number, number][]; total: number; big: boolean }) {
+  const [ax, ay] = item.axes ?? ["X", "Y"];
+  const min = item.range?.min ?? 1;
+  const max = item.range?.max ?? 10;
+  const W = 400;
+  const pad = 34;
+  const pos = (v: number) => pad + ((v - min) / Math.max(1, max - min)) * (W - pad * 2);
+  const [hover, setHover] = useState<number | null>(null);
+  if (!total) return <Empty>Dots appear here as people answer.</Empty>;
+  return (
+    <figure class={`grid-chart ${big ? "big" : ""}`} aria-label={`${ax} versus ${ay}`}>
+      <svg viewBox={`0 0 ${W} ${W}`} role="img">
+        <rect x={pad} y={pad} width={W - pad * 2} height={W - pad * 2} class="g-frame" />
+        <line x1={W / 2} y1={pad} x2={W / 2} y2={W - pad} class="g-mid" />
+        <line x1={pad} y1={W / 2} x2={W - pad} y2={W / 2} class="g-mid" />
+        <text x={W / 2} y={W - 8} class="g-axis" text-anchor="middle">
+          {ax} →
+        </text>
+        <text x={12} y={W / 2} class="g-axis" text-anchor="middle" transform={`rotate(-90 12 ${W / 2})`}>
+          {ay} →
+        </text>
+        {pairs.map(([x, y], i) => {
+          const cx = pos(x);
+          const cy = W - pos(y);
+          const right = cx < W - 120;
+          return (
+            <g key={i} class={`g-pt ${hover === i ? "on" : ""}`} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} tabIndex={0} onFocus={() => setHover(i)} onBlur={() => setHover(null)}>
+              <circle cx={cx} cy={cy} r={16} class="g-hit" />
+              <circle cx={cx} cy={cy} r={7} class="g-dot" />
+              <text x={right ? cx + 12 : cx - 12} y={cy + 4} text-anchor={right ? "start" : "end"} class="g-label">
+                {item.options[i]}
+              </text>
+              {hover === i && (
+                <text x={right ? cx + 12 : cx - 12} y={cy + 20} text-anchor={right ? "start" : "end"} class="g-val">
+                  {ax} {x}, {ay} {y}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      <figcaption class="muted tiny">
+        Average of {plural(total, "answer")}, on a {min}–{max} scale.
+      </figcaption>
+    </figure>
+  );
+}
+
+/** Where people tapped on the picture. Dots are see-through, so busy spots look darker. */
+export function PinMap({ src, pins, big, mine }: { src: string; pins: [number, number][]; big: boolean; mine?: [number, number] | null }) {
+  return (
+    <figure class={`pin-map ${big ? "big" : ""}`}>
+      <div class="pin-wrap">
+        <img src={src} alt="" />
+        {pins.map(([x, y], i) => (
+          <i key={i} class="pin-dot" style={{ left: `${x * 100}%`, top: `${y * 100}%` }} />
+        ))}
+        {mine && <i class="pin-dot mine" style={{ left: `${mine[0] * 100}%`, top: `${mine[1] * 100}%` }} aria-label="Your pin" />}
+      </div>
+      <figcaption class="muted tiny">{plural(pins.length, "pin")}</figcaption>
+    </figure>
+  );
+}
+
+// ---------- labels and replies ----------
+
+export function LabelChip({ label, onClick, on }: { label: Label; onClick?: () => void; on?: boolean }) {
+  const cls = `label-chip c-${label.color} ${on === false ? "off" : ""}`;
+  return onClick ? (
+    <button type="button" class={cls} aria-pressed={on} onClick={onClick}>
+      {label.name}
+    </button>
+  ) : (
+    <span class={cls}>{label.name}</span>
+  );
+}
+
+export function QuestionLabels({ q, labels }: { q: Question; labels: Label[] }) {
+  const mine = labels.filter((l) => q.labels.includes(l.id));
+  if (!mine.length) return null;
+  return (
+    <div class="labels">
+      {mine.map((l) => (
+        <LabelChip key={l.id} label={l} />
+      ))}
+    </div>
+  );
+}
+
+export function Replies({ replies, canDelete, onDelete }: { replies: Reply[]; canDelete?: (r: Reply) => boolean; onDelete?: (r: Reply) => void }) {
+  if (!replies.length) return null;
+  return (
+    <ul class="replies">
+      {replies.map((r) => (
+        <li key={r.id} class={r.official ? "official" : ""}>
+          <div class="reply-meta">
+            <b>{r.name || "Anonymous"}</b>
+            {r.official && <span class="tag answered">Official reply</span>}
+            <span>{ago(r.ts)}</span>
+            {canDelete?.(r) && (
+              <button class="btn sm quiet" onClick={() => onDelete?.(r)} aria-label="Delete reply">
+                Delete
+              </button>
+            )}
+          </div>
+          <div class="text">{r.text}</div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** "Opens at 2:30 PM" for times today, otherwise with the date. */
+export function whenText(ts: number): string {
+  const d = new Date(ts);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return sameDay ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
 }

@@ -17,14 +17,20 @@
 
 **Attendees** — `/e/CODE` (no account, ever)
 - Ask questions, named or anonymous; upvote (and optionally downvote) others
-- Edit or withdraw your own questions
-- Answer 8 kinds of polls: multiple choice, quiz, rating, scale, ranking, word cloud, open text and multi-question surveys
+- Edit or withdraw your own questions; reply to others (when the host allows)
+- Pick a Q&A room when an event has several (e.g. one per session)
+- Answer 11 kinds of polls: multiple choice, quiz, rating, scale, ranking, word cloud, open text, 100 points, 2×2 grid, pin on image and multi-question surveys
 - Quiz mode with a countdown, points for speed and a live leaderboard
 - Send emoji reactions that float up the big screen
 - Works in light and dark mode, sized for one-handed phone use
 
 **Hosts** — `/host/CODE#hostkey` (private link, given when you create an event)
-- Q&A moderation: review first, show on screen, mark answered, archive, delete
+- Q&A moderation: review first, show on screen, mark answered, archive, delete, reply, label, move between rooms
+- A separate **moderator link** for helpers who handle questions but can't touch polls or settings
+- Word filter (hide bad words, or send them to review) with your own word list; hide names from the audience
+- Open and close questions on a schedule; delete the whole event automatically on a set date
+- Start from 7 ready-made templates (class check-in, all-hands, retro, feedback, icebreakers, trivia, brainstorm) or copy one of your own events
+- Event logo, plus a live **analytics** page: who joined, peak attendance, activity over time, poll response rates, top questions
 - Build polls ahead of time, with images on options; launch, close, reorder, duplicate, clear answers
 - Quiz: set a timer (or none), reveal the answer, show the leaderboard on the big screen
 - Event passcode, and ask people for their name or name + email before they join
@@ -35,6 +41,7 @@
 - Giant join code, URL and QR code always visible
 - Live results for every poll type, quiz countdown and answer reveal
 - Podium leaderboard with confetti, floating reactions, highlighted question
+- One screen per room with `?room=` links
 
 ## Quick start
 
@@ -102,7 +109,7 @@ Browser ──HTTP──▶ Worker (src/worker/index.ts) ──▶ web app (Prea
 npm run typecheck
 npm test                     # unit tests
 npm run preview              # start the built app on http://localhost:8787, then in a second terminal:
-npm run test:e2e             # 100+ end-to-end checks with a host, attendees and a big screen
+npm run test:e2e             # 170+ end-to-end checks with hosts, moderators, attendees and a big screen
 npm run test:load -- 2000    # 2,000 simulated attendees: poll, upvotes and a quiz reveal
 ```
 
