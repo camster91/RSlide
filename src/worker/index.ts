@@ -1,6 +1,7 @@
 import { EventRoom, type Env } from "./room";
 import { clean, newCode, newId, normCode } from "./logic";
-import { LIMITS } from "../shared/protocol";
+import { LIMITS, type EventTemplate } from "../shared/protocol";
+import { templateById } from "../shared/templates";
 
 export { EventRoom };
 
@@ -18,12 +19,32 @@ export default {
     // POST /api/events → create a new event
     if (parts.length === 2) {
       if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-      const body = (await request.json().catch(() => ({}))) as { title?: string };
-      const title = clean(body.title, LIMITS.title) || "Untitled session";
+      const body = (await request.json().catch(() => ({}))) as { title?: string; template?: string; from?: { code?: string; key?: string } };
+      // Start from a built-in template, or copy one of your own events.
+      let template: EventTemplate | null = null;
+      let media: string[] = [];
+      let fromCode = "";
+      if (body.from) {
+        fromCode = normCode(body.from.code);
+        const copied = fromCode ? await env.EVENTS.getByName(fromCode).exportTemplate(String(body.from.key ?? "")) : null;
+        if (!copied) return json({ error: "Couldn't copy that event. Check the host link." }, 403);
+        template = copied.template as EventTemplate;
+        media = copied.media;
+      } else if (body.template) {
+        template = templateById(body.template) ?? null;
+        if (!template) return json({ error: "Unknown template" }, 400);
+      }
+      const title = clean(body.title, LIMITS.title) || (body.from && template?.title ? `${template.title} (copy)`.slice(0, LIMITS.title) : "Untitled session");
       for (let i = 0; i < 5; i++) {
         const code = newCode();
-        const res = await env.EVENTS.getByName(code).create(code, title);
-        if (res.ok) return json(res, 201);
+        const room = env.EVENTS.getByName(code);
+        const res = await room.create(code, title);
+        if (!res.ok) continue;
+        if (template) {
+          if (media.length && env.MEDIA) await copyMedia(env.MEDIA, fromCode, code, media);
+          await room.applyTemplate(template);
+        }
+        return json(res, 201);
       }
       return json({ error: "Could not create event, try again" }, 500);
     }
@@ -40,6 +61,11 @@ export default {
     }
 
     if (action === "ws") return room.fetch(request);
+
+    if (action === "analytics") {
+      const data = await room.analytics(key);
+      return data ? json(data) : json({ error: "Forbidden" }, 403);
+    }
 
     if (action === "export") {
       const format = url.searchParams.get("format") === "xlsx" ? "xlsx" : "csv";
@@ -93,3 +119,13 @@ export default {
     return json({ error: "Not found" }, 404);
   },
 } satisfies ExportedHandler<Env>;
+
+/** Images belong to an event, so copying an event copies its images too. */
+async function copyMedia(bucket: R2Bucket, from: string, to: string, ids: string[]) {
+  await Promise.all(
+    ids.slice(0, 200).map(async (id) => {
+      const obj = await bucket.get(`events/${from}/${id}`);
+      if (obj) await bucket.put(`events/${to}/${id}`, obj.body, { httpMetadata: obj.httpMetadata });
+    }),
+  );
+}

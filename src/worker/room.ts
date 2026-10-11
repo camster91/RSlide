@@ -3,35 +3,48 @@ import {
   CLOSE,
   DEFAULT_SETTINGS,
   LIMITS,
+  MAIN_ROOM,
   PING,
   PONG,
   PRESENT_MODES,
   REACTIONS,
   THEMES,
+  type Analytics,
   type ClientMsg,
   type EventInfo,
+  type EventTemplate,
   type Identity,
   type Item,
+  type Label,
   type Leaderboard,
   type Me,
   type Meta,
   type Op,
   type Poll,
+  type PollDraft,
   type PollStatus,
   type PresentMode,
+  type Profanity,
   type Question,
   type QuestionStatus,
   type Reaction,
+  type Reply,
   type ResponseValue,
   type Results,
   type Role,
+  type Room,
   type ServerMsg,
   type Settings,
 } from "../shared/protocol";
 import {
   clean,
+  cleanBlockedWords,
   cleanEmail,
+  cleanLabels,
+  cleanRooms,
   describeAnswer,
+  isMediaId,
+  maskWords,
   newHostKey,
   newId,
   normPasscode,
@@ -42,6 +55,7 @@ import {
   UserError,
   validatePoll,
   validateResponse,
+  type CleanPoll,
 } from "./logic";
 import { buildXlsx, type Cell, type Sheet } from "./xlsx";
 
@@ -60,12 +74,16 @@ interface EventRecord {
   code: string;
   title: string;
   hostKey: string;
+  modKey: string;
   createdAt: number;
   expiresAt: number | null;
   settings: Settings;
   presentMode: PresentMode;
   activePollId: string | null;
   passcode: string;
+  labels: Label[];
+  rooms: Room[];
+  stats: { peakOnline: number; peakAt: number | null };
 }
 
 interface Attachment {
@@ -84,7 +102,11 @@ type QuestionRow = {
   votes: number;
   downs: number;
   edited: number;
+  room: string;
+  labels: string;
 };
+
+type ReplyRow = { id: string; qid: string; text: string; name: string; pid: string; ts: number; official: number };
 
 type PollRow = {
   id: string;
@@ -104,6 +126,8 @@ type PollRow = {
   time_limit: number;
   started_at: number | null;
   items: string;
+  axes: string;
+  image: string | null;
 };
 
 type ResponseRow = { pid: string; value: string; ts: number; elapsed: number | null };
@@ -118,13 +142,17 @@ interface LeaderData {
   rank: Map<string, number>;
 }
 
+type Activity = "join" | "ask" | "vote" | "answer" | "react" | "reply";
+
 const FLUSH_MS = 80;
 const ONLINE_MS = 2000;
-const ROLES: Role[] = ["host", "present", "attendee"];
-const BOOL_SETTINGS = ["qaOpen", "moderation", "allowAnonymous", "allowDownvotes", "reactions"] as const;
+const ROLES: Role[] = ["host", "mod", "present", "attendee"];
+const BOOL_SETTINGS = ["qaOpen", "moderation", "allowAnonymous", "allowDownvotes", "reactions", "audienceReplies", "hideNames"] as const;
 const IDENTITIES: Identity[] = ["none", "name", "email"];
+const PROFANITY: Profanity[] = ["off", "mask", "review"];
 /** Extra time allowed after a quiz timer ends, for slow networks. */
 const QUIZ_GRACE_MS = 1500;
+const isStaff = (role: Role) => role === "host" || role === "mod";
 
 /**
  * One EventRoom per event code. Holds all questions, votes, polls and responses
@@ -147,11 +175,14 @@ export class EventRoom extends DurableObject<Env> {
   private dirtyR = new Set<string>();
   private dirtyMe = new Set<string>();
   private reactionCounts = new Map<Reaction, number>();
+  /** Activity per minute, waiting to be saved for analytics. */
+  private activity = new Map<string, number>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private onlineTimer: ReturnType<typeof setTimeout> | null = null;
 
   private votesLimit = new RateLimiter(30, 10_000);
   private asksLimit = new RateLimiter(5, 60_000);
+  private repliesLimit = new RateLimiter(5, 60_000);
   private reactLimit = new RateLimiter(10, 5_000);
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -164,10 +195,15 @@ export class EventRoom extends DurableObject<Env> {
       const row = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'event'").toArray()[0];
       this.ev = row ? (JSON.parse(row.v) as EventRecord) : null;
       if (this.ev) {
+        // Fill in fields added by newer versions.
         const old = this.ev.settings as Settings & { requireName?: boolean };
         this.ev.settings = { ...DEFAULT_SETTINGS, ...old };
         delete (this.ev.settings as { requireName?: boolean }).requireName;
         this.ev.passcode ??= "";
+        this.ev.modKey ??= newHostKey();
+        this.ev.labels ??= [];
+        this.ev.rooms ??= [];
+        this.ev.stats ??= { peakOnline: 0, peakAt: null };
       }
     });
   }
@@ -197,6 +233,14 @@ export class EventRoom extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS participants (
         pid TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', joined_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS replies (
+        id TEXT PRIMARY KEY, qid TEXT NOT NULL, text TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', pid TEXT NOT NULL,
+        ts INTEGER NOT NULL, official INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS replies_qid ON replies(qid);
+      CREATE INDEX IF NOT EXISTS replies_pid ON replies(pid);
+      CREATE TABLE IF NOT EXISTS timeline (minute INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (minute, kind));
+      CREATE TABLE IF NOT EXISTS seen (pid TEXT PRIMARY KEY, first INTEGER NOT NULL, last INTEGER NOT NULL);
     `);
     // Columns added in v0.2
     this.addColumn("questions", "downs", "INTEGER NOT NULL DEFAULT 0");
@@ -208,6 +252,11 @@ export class EventRoom extends DurableObject<Env> {
     this.addColumn("polls", "started_at", "INTEGER");
     this.addColumn("polls", "items", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("responses", "elapsed", "INTEGER");
+    // Columns added in v0.3
+    this.addColumn("questions", "room", `TEXT NOT NULL DEFAULT '${MAIN_ROOM}'`);
+    this.addColumn("questions", "labels", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("polls", "axes", "TEXT NOT NULL DEFAULT 'null'");
+    this.addColumn("polls", "image", "TEXT");
   }
 
   private addColumn(table: string, column: string, def: string) {
@@ -223,12 +272,16 @@ export class EventRoom extends DurableObject<Env> {
       code: old.code,
       title: old.title,
       hostKey: old.hostKey,
+      modKey: newHostKey(),
       createdAt: old.createdAt,
       expiresAt: null,
       settings: { ...DEFAULT_SETTINGS, ...old.settings },
       presentMode: old.presentMode ?? "auto",
       activePollId: old.activePollId ?? null,
       passcode: "",
+      labels: [],
+      rooms: [],
+      stats: { peakOnline: 0, peakAt: null },
     };
     this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('event', ?)", JSON.stringify(ev));
     for (const q of old.questions ?? []) {
@@ -245,8 +298,13 @@ export class EventRoom extends DurableObject<Env> {
     await this.ctx.storage.delete("state");
   }
 
-  private saveEvent() {
+  /** Saves the event record without telling anyone (for stats). */
+  private persistEvent() {
     this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('event', ?)", JSON.stringify(this.ev));
+  }
+
+  private saveEvent() {
+    this.persistEvent();
     this.dirtyMeta = true;
     this.scheduleFlush();
   }
@@ -261,33 +319,95 @@ export class EventRoom extends DurableObject<Env> {
       code,
       title,
       hostKey: newHostKey(),
+      modKey: newHostKey(),
       createdAt: now,
       expiresAt: ttl > 0 ? now + ttl * 3_600_000 : null,
       settings: { ...DEFAULT_SETTINGS },
       presentMode: "auto",
       activePollId: null,
       passcode: "",
+      labels: [],
+      rooms: [],
+      stats: { peakOnline: 0, peakAt: null },
     };
-    this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('event', ?)", JSON.stringify(this.ev));
-    if (this.ev.expiresAt) await this.ctx.storage.setAlarm(this.ev.expiresAt);
+    this.persistEvent();
+    await this.scheduleAlarm();
     return { ok: true, code, hostKey: this.ev.hostKey, title };
   }
 
   async info(): Promise<EventInfo | null> {
     if (!this.ev) return null;
     const s = this.ev.settings;
-    return { code: this.ev.code, title: this.ev.title, passcode: !!this.ev.passcode, identity: s.identity, theme: s.theme };
+    return { code: this.ev.code, title: this.ev.title, passcode: !!this.ev.passcode, identity: s.identity, theme: s.theme, logo: s.logo };
   }
 
   async isHost(key: string): Promise<boolean> {
     return !!this.ev && !!key && key === this.ev.hostKey;
   }
 
+  /** Copies this event's setup (not its answers) so it can be reused. */
+  async exportTemplate(key: string): Promise<{ template: EventTemplate; media: string[] } | null> {
+    if (!(await this.isHost(key))) return null;
+    const ev = this.ev!;
+    const { qaOpen, moderation, allowAnonymous, allowDownvotes, reactions, identity, theme, screen, audienceReplies, hideNames, profanity, blockedWords, logo } = ev.settings;
+    const polls: PollDraft[] = this.allPolls().map((p) => ({
+      type: p.type,
+      title: p.title,
+      options: p.options,
+      images: p.images,
+      correct: p.correct ?? [],
+      multi: p.multi,
+      range: p.range,
+      timeLimit: p.timeLimit,
+      axes: p.axes,
+      image: p.image,
+      items: p.items.map((it) => ({ type: it.type as Exclude<Item["type"], "quiz">, title: it.title, options: it.options, images: it.images, multi: it.multi, range: it.range, axes: it.axes, image: it.image })),
+    }));
+    const media = new Set<string>();
+    const addImgs = (x: { images?: (string | null)[]; image?: string | null }) => {
+      x.images?.forEach((i) => i && media.add(i));
+      if (x.image) media.add(x.image);
+    };
+    for (const p of polls) {
+      addImgs(p);
+      p.items?.forEach(addImgs);
+    }
+    if (logo) media.add(logo);
+    return {
+      template: {
+        title: ev.title,
+        settings: { qaOpen, moderation, allowAnonymous, allowDownvotes, reactions, identity, theme, screen, audienceReplies, hideNames, profanity, blockedWords, logo },
+        labels: ev.labels.map(({ name, color }) => ({ name, color })),
+        rooms: ev.rooms.map(({ name }) => ({ name })),
+        polls,
+      },
+      media: [...media],
+    };
+  }
+
+  /** Sets up a brand-new event from a template. Polls that don't validate are skipped. */
+  async applyTemplate(t: EventTemplate): Promise<{ polls: number }> {
+    if (!this.ev) return { polls: 0 };
+    this.applySettings(t.settings ?? {});
+    if (t.labels?.length) this.ev.labels = cleanLabels(t.labels, newId);
+    if (t.rooms?.length) this.ev.rooms = this.withMainRoom(cleanRooms(t.rooms, newId));
+    let n = 0;
+    for (const d of (t.polls ?? []).slice(0, LIMITS.importPolls)) {
+      try {
+        this.insertPoll(validatePoll(d));
+        n++;
+      } catch {}
+    }
+    this.persistEvent();
+    return { polls: n };
+  }
+
   async exportCsv(key: string): Promise<string | null> {
     if (!(await this.isHost(key))) return null;
     const rows: (string | number)[][] = [["Section", "Item", "Detail", "Count / Value", "Status", "Time"]];
+    const roomName = this.roomNamer();
     for (const q of this.sql.exec<QuestionRow>("SELECT * FROM questions ORDER BY ts").toArray())
-      rows.push(["Q&A", q.text, q.name || "Anonymous", q.votes - q.downs, q.status, new Date(q.ts).toISOString()]);
+      rows.push([`Q&A${this.ev!.rooms.length > 1 ? ` (${roomName(q.room)})` : ""}`, q.text, q.name || "Anonymous", q.votes - q.downs, q.status, new Date(q.ts).toISOString()]);
     for (const r of this.pollSummaryRows()) rows.push([r[0], r[1], r[2], r[3], r[4], ""] as (string | number)[]);
     return toCsv(rows);
   }
@@ -296,16 +416,33 @@ export class EventRoom extends DurableObject<Env> {
     if (!(await this.isHost(key))) return null;
     const names = this.participantNames();
     const who = (pid: string) => names.get(pid)?.name || "Anonymous";
+    const labelName = new Map(this.ev!.labels.map((l) => [l.id, l.name]));
+    const roomName = this.roomNamer();
+    const replies = this.repliesFor(null);
     const sheets: Sheet[] = [];
 
     sheets.push({
       name: "Questions",
       rows: [
-        ["Question", "Asked by", "Upvotes", "Downvotes", "Score", "Status", "Asked at"],
+        ["Question", "Asked by", "Upvotes", "Downvotes", "Score", "Status", "Room", "Labels", "Replies", "Asked at"],
         ...this.sql
           .exec<QuestionRow>("SELECT * FROM questions ORDER BY votes - downs DESC, ts")
           .toArray()
-          .map((q) => [q.text, q.name || "Anonymous", q.votes, q.downs, q.votes - q.downs, q.status, new Date(q.ts).toISOString()] as Cell[]),
+          .map(
+            (q) =>
+              [
+                q.text,
+                q.name || "Anonymous",
+                q.votes,
+                q.downs,
+                q.votes - q.downs,
+                q.status,
+                roomName(q.room),
+                (JSON.parse(q.labels) as string[]).map((l) => labelName.get(l) ?? "").filter(Boolean).join(", "),
+                (replies.get(q.id) ?? []).map((r) => `${r.official ? "[Host] " : ""}${r.name ? r.name + ": " : ""}${r.text}`).join("\n"),
+                new Date(q.ts).toISOString(),
+              ] as Cell[],
+          ),
       ],
     });
     sheets.push({ name: "Poll results", rows: [["Poll", "Type", "Answer / option", "Count / value", "Status"], ...this.pollSummaryRows()] });
@@ -325,7 +462,7 @@ export class EventRoom extends DurableObject<Env> {
     if (lb.board.rounds > 0)
       sheets.push({
         name: "Quiz leaderboard",
-        rows: [["Rank", "Player", "Points", "Correct answers"], ...lb.ranked.map((r, i) => [i + 1, who(r.pid), r.points, lb.byPid.get(r.pid)?.correct ?? 0] as Cell[])],
+        rows: [["Rank", "Player", "Points", "Correct answers"], ...lb.ranked.map((r) => [lb.rank.get(r.pid) ?? 0, who(r.pid), r.points, lb.byPid.get(r.pid)?.correct ?? 0] as Cell[])],
       });
 
     const people = [...names.entries()].filter(([, p]) => p.name || p.email);
@@ -335,17 +472,93 @@ export class EventRoom extends DurableObject<Env> {
     return buildXlsx(sheets);
   }
 
+  async analytics(key: string): Promise<Analytics | null> {
+    if (!(await this.isHost(key))) return null;
+    this.saveActivity();
+    const ev = this.ev!;
+    const count = (q: string, ...args: unknown[]) => this.sql.exec<{ n: number }>(q, ...args).one().n;
+    const minutes = new Map<number, Analytics["timeline"][number]>();
+    let reactions = 0;
+    for (const r of this.sql.exec<{ minute: number; kind: Activity; n: number }>("SELECT minute, kind, n FROM timeline ORDER BY minute")) {
+      const row = minutes.get(r.minute) ?? { t: r.minute * 60_000, joins: 0, questions: 0, votes: 0, answers: 0, reactions: 0 };
+      if (r.kind === "join") row.joins += r.n;
+      else if (r.kind === "ask") row.questions += r.n;
+      else if (r.kind === "vote") row.votes += r.n;
+      else if (r.kind === "answer") row.answers += r.n;
+      else if (r.kind === "react") row.reactions += r.n;
+      if (r.kind === "react") reactions += r.n;
+      minutes.set(r.minute, row);
+    }
+    const roomName = this.roomNamer();
+    return {
+      code: ev.code,
+      title: ev.title,
+      createdAt: ev.createdAt,
+      participants: count("SELECT COUNT(*) AS n FROM seen"),
+      peakOnline: Math.max(ev.stats.peakOnline, this.onlineCount()),
+      peakAt: ev.stats.peakAt,
+      questions: count("SELECT COUNT(*) AS n FROM questions"),
+      askers: count("SELECT COUNT(DISTINCT pid) AS n FROM questions"),
+      votes: count("SELECT COUNT(*) AS n FROM votes"),
+      replies: count("SELECT COUNT(*) AS n FROM replies"),
+      reactions,
+      polls: this.allPolls()
+        .filter((p) => p.status !== "draft")
+        .map((p) => ({ id: p.id, title: p.title, type: p.type, responses: count("SELECT COUNT(*) AS n FROM responses WHERE poll_id = ?", p.id) })),
+      timeline: [...minutes.values()],
+      topQuestions: this.sql
+        .exec<{ text: string; score: number; status: QuestionStatus }>("SELECT text, votes - downs AS score, status FROM questions ORDER BY score DESC, ts LIMIT 5")
+        .toArray(),
+      rooms: this.sql
+        .exec<{ room: string; n: number }>("SELECT room, COUNT(*) AS n FROM questions GROUP BY room ORDER BY n DESC")
+        .toArray()
+        .map((r) => ({ name: roomName(r.room), questions: r.n })),
+    };
+  }
+
+  // ---------- scheduled jobs (one alarm per event, set to whichever comes first) ----------
+
+  private async scheduleAlarm() {
+    const ev = this.ev;
+    if (!ev) return;
+    const s = ev.settings;
+    const times = [ev.expiresAt, s.deleteAt, s.qaOpensAt, s.qaClosesAt].filter((t): t is number => typeof t === "number" && t > 0);
+    if (times.length) await this.ctx.storage.setAlarm(Math.min(...times));
+    else await this.ctx.storage.deleteAlarm();
+  }
+
   async alarm() {
-    if (this.ev?.expiresAt && Date.now() >= this.ev.expiresAt) {
+    const ev = this.ev;
+    if (!ev) return;
+    const now = Date.now();
+    const s = ev.settings;
+    if ((ev.expiresAt && now >= ev.expiresAt) || (s.deleteAt && now >= s.deleteAt)) {
       for (const ws of this.ctx.getWebSockets()) {
         try {
-          ws.close(CLOSE.NOT_FOUND, "Event expired");
+          ws.close(CLOSE.NOT_FOUND, "Event deleted");
         } catch {}
       }
-      await this.deleteMedia(this.ev.code);
+      await this.deleteMedia(ev.code);
       this.ev = null;
       await this.ctx.storage.deleteAll();
+      return;
     }
+    let changed = false;
+    if (s.qaOpensAt && now >= s.qaOpensAt) {
+      s.qaOpen = true;
+      s.qaOpensAt = null;
+      changed = true;
+    }
+    if (s.qaClosesAt && now >= s.qaClosesAt) {
+      s.qaOpen = false;
+      s.qaClosesAt = null;
+      changed = true;
+    }
+    if (changed) {
+      this.saveEvent();
+      this.flush();
+    }
+    await this.scheduleAlarm();
   }
 
   private async deleteMedia(code: string) {
@@ -376,31 +589,39 @@ export class EventRoom extends DurableObject<Env> {
       return new Response(null, { status: 101, webSocket: client });
     };
 
-    if (!this.ev) return reject(CLOSE.NOT_FOUND, "Event not found");
-    if (role === "host" && key !== this.ev.hostKey) return reject(CLOSE.FORBIDDEN, "Wrong host link");
+    const ev = this.ev;
+    if (!ev) return reject(CLOSE.NOT_FOUND, "Event not found");
+    if (role === "host" && key !== ev.hostKey) return reject(CLOSE.FORBIDDEN, "Wrong host link");
+    // The host link also works as a moderator link.
+    if (role === "mod" && key !== ev.modKey && key !== ev.hostKey) return reject(CLOSE.FORBIDDEN, "This moderator link has expired");
     // The big screen is read-only. Without the key it sees what attendees see.
-    if (role === "present" && key !== this.ev.hostKey) role = "attendee";
-    if (role === "attendee" && this.ev.passcode && normPasscode(url.searchParams.get("pass")) !== this.ev.passcode)
-      return reject(CLOSE.PASSCODE, "Passcode needed");
+    if (role === "present" && key !== ev.hostKey) role = "attendee";
+    if (role === "attendee" && ev.passcode && normPasscode(url.searchParams.get("pass")) !== ev.passcode) return reject(CLOSE.PASSCODE, "Passcode needed");
     const max = Number(this.env.MAX_PARTICIPANTS || 0);
     if (role === "attendee" && max > 0 && this.ctx.getWebSockets("attendee").length >= max) return reject(CLOSE.FULL, "This event is full");
 
     this.ctx.acceptWebSocket(server, [role, `pid:${pid}`]);
     server.serializeAttachment({ role, pid } satisfies Attachment);
+    if (role === "attendee") {
+      const now = Date.now();
+      const isNew = !this.sql.exec("SELECT 1 FROM seen WHERE pid = ?", pid).toArray().length;
+      this.sql.exec("INSERT INTO seen (pid, first, last) VALUES (?,?,?) ON CONFLICT(pid) DO UPDATE SET last = excluded.last", pid, now, now);
+      if (isNew) this.track("join");
+    }
     this.send(server, {
       type: "hello",
       role,
       snapshot: this.snapshot(role, pid),
       me: this.me(pid),
       now: Date.now(),
-      ...(role === "host" ? { hostKey: this.ev.hostKey } : {}),
+      ...(role === "host" ? { hostKey: ev.hostKey } : {}),
     });
     this.scheduleOnline();
     return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
-    if (!this.ev || typeof raw !== "string" || raw.length > 20_000) return;
+    if (!this.ev || typeof raw !== "string" || raw.length > 40_000) return;
     let msg: ClientMsg;
     try {
       msg = JSON.parse(raw);
@@ -409,10 +630,10 @@ export class EventRoom extends DurableObject<Env> {
     }
     if (!msg || typeof msg !== "object") return;
     const { role, pid } = ws.deserializeAttachment() as Attachment;
+    if (role === "present") return;
     try {
-      if (role === "attendee" || role === "host") {
-        if (this.handleAudience(msg, pid, role)) return;
-      }
+      if (this.handleAudience(msg, pid, role)) return;
+      if (isStaff(role) && this.handleModeration(msg)) return;
       if (role === "host") this.handleHost(msg);
     } catch (e) {
       if (e instanceof UserError) this.send(ws, { type: "error", message: e.message });
@@ -452,9 +673,36 @@ export class EventRoom extends DurableObject<Env> {
   }
 
   private requireJoined(pid: string, role: Role) {
-    if (role === "host") return;
+    if (isStaff(role)) return;
     if (!this.hasJoined(this.participant(pid)))
       throw new UserError(this.ev!.settings.identity === "email" ? "Please enter your name and email to take part" : "Please enter your name to take part");
+  }
+
+  // ---------- word filter ----------
+
+  /** Applies the host's word filter. Staff are never filtered. */
+  private filter(text: string, role: Role): { text: string; hit: boolean } {
+    const s = this.ev!.settings;
+    if (s.profanity === "off" || isStaff(role)) return { text, hit: false };
+    return maskWords(text, s.blockedWords);
+  }
+
+  // ---------- rooms ----------
+
+  private roomIds(): Set<string> {
+    const rooms = this.ev!.rooms;
+    return new Set(rooms.length ? rooms.map((r) => r.id) : [MAIN_ROOM]);
+  }
+
+  private roomNamer() {
+    const names = new Map(this.ev!.rooms.map((r) => [r.id, r.name]));
+    return (id: string) => names.get(id) ?? "Main";
+  }
+
+  /** The first room keeps the "main" ID so existing questions stay put. */
+  private withMainRoom(rooms: Room[]): Room[] {
+    if (!rooms.length || rooms.some((r) => r.id === MAIN_ROOM)) return rooms;
+    return [{ ...rooms[0], id: MAIN_ROOM }, ...rooms.slice(1)];
   }
 
   // ---------- audience actions ----------
@@ -479,23 +727,28 @@ export class EventRoom extends DurableObject<Env> {
       case "ask": {
         this.requireJoined(pid, role);
         if (!ev.settings.qaOpen) throw new UserError("Questions are closed right now");
-        const text = clean(msg.text, LIMITS.question);
-        if (!text) throw new UserError("Question is empty");
+        const raw = clean(msg.text, LIMITS.question);
+        if (!raw) throw new UserError("Question is empty");
         let name = clean(msg.name, LIMITS.name);
-        if (ev.settings.identity !== "none" && role !== "host") name = this.participant(pid)?.name ?? name;
+        if (ev.settings.identity !== "none" && !isStaff(role)) name = this.participant(pid)?.name ?? name;
         if (!name && !ev.settings.allowAnonymous) throw new UserError("Please add your name");
-        if (role !== "host" && !this.asksLimit.take(pid)) throw new UserError("Slow down a little — try again in a minute");
+        if (!isStaff(role) && !this.asksLimit.take(pid)) throw new UserError("Slow down a little — try again in a minute");
+        const { text, hit } = this.filter(raw, role);
+        const room = this.roomIds().has(String(msg.room)) ? String(msg.room) : [...this.roomIds()][0];
         const id = newId();
-        const status: QuestionStatus = ev.settings.moderation && role !== "host" ? "pending" : "live";
-        this.sql.exec("INSERT INTO questions (id, text, name, pid, ts, status) VALUES (?,?,?,?,?,?)", id, text, name, pid, Date.now(), status);
+        const status: QuestionStatus = isStaff(role) ? "live" : ev.settings.moderation || (hit && ev.settings.profanity === "review") ? "pending" : "live";
+        // In review mode the host sees the original words, so they can decide.
+        const stored = ev.settings.profanity === "review" ? raw : text;
+        this.sql.exec("INSERT INTO questions (id, text, name, pid, ts, status, room) VALUES (?,?,?,?,?,?,?)", id, stored, name, pid, Date.now(), status, room);
         // Remember the name they typed so it can show on the quiz leaderboard.
-        if (name && role !== "host" && ev.settings.identity === "none") {
+        if (name && !isStaff(role) && ev.settings.identity === "none") {
           this.sql.exec(
             "INSERT INTO participants (pid, name, email, joined_at) VALUES (?,?,'',?) ON CONFLICT(pid) DO UPDATE SET name = CASE WHEN participants.name = '' THEN excluded.name ELSE participants.name END",
             pid, name, Date.now(),
           );
           this.invalidateLb();
         }
+        this.track("ask");
         this.touchQ(id);
         this.touchMe(pid);
         return true;
@@ -512,6 +765,7 @@ export class EventRoom extends DurableObject<Env> {
         if (cur?.v === dir) this.sql.exec("DELETE FROM votes WHERE qid = ? AND pid = ?", id, pid);
         else this.sql.exec("INSERT INTO votes (qid, pid, v) VALUES (?,?,?) ON CONFLICT(qid, pid) DO UPDATE SET v = excluded.v", id, pid, dir);
         this.recountVotes(id);
+        this.track("vote");
         this.touchQ(id);
         this.touchMe(pid);
         return true;
@@ -519,9 +773,12 @@ export class EventRoom extends DurableObject<Env> {
       case "editQuestion": {
         const q = this.ownQuestion(msg.id, pid);
         if (q.status !== "pending" && q.status !== "live") throw new UserError("This question can't be edited any more");
-        const text = clean(msg.text, LIMITS.question);
-        if (!text) throw new UserError("Question is empty");
-        this.sql.exec("UPDATE questions SET text = ?, edited = 1 WHERE id = ?", text, q.id);
+        const raw = clean(msg.text, LIMITS.question);
+        if (!raw) throw new UserError("Question is empty");
+        const { text, hit } = this.filter(raw, role);
+        const review = ev.settings.profanity === "review";
+        const status = review && hit ? "pending" : q.status;
+        this.sql.exec("UPDATE questions SET text = ?, edited = 1, status = ? WHERE id = ?", review ? raw : text, status, q.id);
         this.touchQ(q.id);
         return true;
       }
@@ -529,6 +786,36 @@ export class EventRoom extends DurableObject<Env> {
         const q = this.ownQuestion(msg.id, pid);
         this.removeQuestion(q.id);
         this.touchMe(pid);
+        return true;
+      }
+      case "reply": {
+        this.requireJoined(pid, role);
+        const official = isStaff(role);
+        if (!official && !ev.settings.audienceReplies) throw new UserError("Replies are turned off");
+        const q = this.sql.exec<{ status: string }>("SELECT status FROM questions WHERE id = ?", String(msg.id)).toArray()[0];
+        if (!q || (!official && (q.status === "pending" || q.status === "archived"))) throw new UserError("You can't reply to this question");
+        const raw = clean(msg.text, LIMITS.reply);
+        if (!raw) throw new UserError("Reply is empty");
+        if (!official && !this.repliesLimit.take(pid)) throw new UserError("Slow down a little — try again in a minute");
+        if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM replies WHERE qid = ?", msg.id).one().n >= LIMITS.replies)
+          throw new UserError("This question has the most replies allowed");
+        let name = clean(msg.name, LIMITS.name);
+        if (!official && ev.settings.identity !== "none") name = this.participant(pid)?.name ?? name;
+        if (official && !name) name = role === "host" ? "Host" : "Moderator";
+        const id = newId();
+        this.sql.exec("INSERT INTO replies (id, qid, text, name, pid, ts, official) VALUES (?,?,?,?,?,?,?)", id, msg.id, this.filter(raw, role).text, name, pid, Date.now(), official ? 1 : 0);
+        this.track("reply");
+        this.touchQ(msg.id);
+        this.touchMe(pid);
+        return true;
+      }
+      case "deleteReply": {
+        const r = this.sql.exec<ReplyRow>("SELECT * FROM replies WHERE id = ? AND qid = ?", String(msg.replyId), String(msg.id)).toArray()[0];
+        if (!r) return true;
+        if (r.pid !== pid && !isStaff(role)) throw new UserError("You can only delete your own replies");
+        this.sql.exec("DELETE FROM replies WHERE id = ?", r.id);
+        this.touchQ(r.qid);
+        this.touchMe(r.pid);
         return true;
       }
       case "respond": {
@@ -541,15 +828,15 @@ export class EventRoom extends DurableObject<Env> {
         if (p.type === "quiz") {
           if (p.revealed) throw new UserError("Answers are closed — the answer has been revealed");
           if (p.timeLimit && p.startedAt && now > p.startedAt + p.timeLimit * 1000 + QUIZ_GRACE_MS) throw new UserError("Time's up!");
-          if (this.sql.exec("SELECT 1 FROM responses WHERE poll_id = ? AND pid = ?", p.id, pid).toArray().length)
-            throw new UserError("You've already answered this one");
+          if (this.sql.exec("SELECT 1 FROM responses WHERE poll_id = ? AND pid = ?", p.id, pid).toArray().length) throw new UserError("You've already answered this one");
           elapsed = p.startedAt ? Math.max(0, now - p.startedAt) : 0;
         }
-        const value = validateResponse(p, msg.value);
+        const value = this.filterAnswer(p, validateResponse(p, msg.value), role);
         this.sql.exec(
           "INSERT INTO responses (poll_id, pid, value, ts, elapsed) VALUES (?,?,?,?,?) ON CONFLICT(poll_id, pid) DO UPDATE SET value = excluded.value, ts = excluded.ts",
           p.id, pid, JSON.stringify(value), now, elapsed,
         );
+        this.track("answer");
         this.touchR(p.id);
         this.touchMe(pid);
         return true;
@@ -559,12 +846,29 @@ export class EventRoom extends DurableObject<Env> {
         if (!REACTIONS.includes(msg.emoji)) return true;
         if (!this.reactLimit.take(pid)) return true; // silently drop spam
         this.reactionCounts.set(msg.emoji, (this.reactionCounts.get(msg.emoji) ?? 0) + 1);
+        this.track("react");
         this.scheduleFlush();
         return true;
       }
       default:
         return false;
     }
+  }
+
+  /** Masks free text in answers. Filtered word-cloud words are dropped, not shown as stars. */
+  private filterAnswer(p: Poll, value: ResponseValue, role: Role): ResponseValue {
+    if (this.ev!.settings.profanity === "off" || isStaff(role)) return value;
+    const one = (type: string, v: unknown): unknown => {
+      if (type === "open" && typeof v === "string") return this.filter(v, role).text;
+      if (type === "wordcloud" && Array.isArray(v)) {
+        const kept = (v as string[]).filter((w) => !this.filter(w, role).hit);
+        if (!kept.length) throw new UserError("Please choose a different word");
+        return kept;
+      }
+      return v;
+    };
+    if (p.type === "survey") return (value as unknown[]).map((v, i) => (v === null ? null : one(p.items[i].type, v))) as ResponseValue;
+    return one(p.type, value) as ResponseValue;
   }
 
   private ownQuestion(id: string, pid: string): QuestionRow {
@@ -581,6 +885,7 @@ export class EventRoom extends DurableObject<Env> {
   }
 
   private removeQuestion(id: string) {
+    for (const r of this.sql.exec<{ pid: string }>("DELETE FROM replies WHERE qid = ? RETURNING pid", id)) this.dirtyMe.add(r.pid);
     this.sql.exec("DELETE FROM votes WHERE qid = ?", id);
     this.sql.exec("DELETE FROM questions WHERE id = ?", id);
     this.deletedQ.add(id);
@@ -588,7 +893,79 @@ export class EventRoom extends DurableObject<Env> {
     this.scheduleFlush();
   }
 
+  // ---------- moderation (host and moderators) ----------
+
+  /** Returns true if handled. */
+  private handleModeration(msg: ClientMsg): boolean {
+    switch (msg.type) {
+      case "approve":
+        this.sql.exec("UPDATE questions SET status = 'live' WHERE id = ? AND status = 'pending'", msg.id);
+        this.touchQ(msg.id);
+        return true;
+      case "answer":
+        this.sql.exec(
+          "UPDATE questions SET status = CASE status WHEN 'answered' THEN 'live' ELSE 'answered' END, highlighted = 0 WHERE id = ? AND status IN ('live','answered')",
+          msg.id,
+        );
+        this.touchQ(msg.id);
+        return true;
+      case "archive":
+        this.sql.exec("UPDATE questions SET status = CASE status WHEN 'archived' THEN 'live' ELSE 'archived' END, highlighted = 0 WHERE id = ?", msg.id);
+        this.touchQ(msg.id);
+        return true;
+      case "highlight": {
+        const cur = this.sql.exec<{ highlighted: number }>("SELECT highlighted FROM questions WHERE id = ?", msg.id).toArray()[0];
+        if (!cur) return true;
+        for (const r of this.sql.exec<{ id: string }>("UPDATE questions SET highlighted = 0 WHERE highlighted = 1 RETURNING id")) this.touchQ(r.id);
+        if (!cur.highlighted) this.sql.exec("UPDATE questions SET highlighted = 1, status = CASE status WHEN 'pending' THEN 'live' ELSE status END WHERE id = ?", msg.id);
+        this.touchQ(msg.id);
+        return true;
+      }
+      case "deleteQuestion":
+        this.removeQuestion(msg.id);
+        return true;
+      case "tagQuestion": {
+        if (!this.ev!.labels.some((l) => l.id === msg.label)) throw new UserError("That label doesn't exist any more");
+        const q = this.sql.exec<{ labels: string }>("SELECT labels FROM questions WHERE id = ?", msg.id).toArray()[0];
+        if (!q) return true;
+        const cur = JSON.parse(q.labels) as string[];
+        const next = cur.includes(msg.label) ? cur.filter((l) => l !== msg.label) : [...cur, msg.label];
+        this.sql.exec("UPDATE questions SET labels = ? WHERE id = ?", JSON.stringify(next), msg.id);
+        this.touchQ(msg.id);
+        return true;
+      }
+      case "moveQuestion":
+        if (!this.roomIds().has(msg.room)) throw new UserError("That room doesn't exist");
+        this.sql.exec("UPDATE questions SET room = ? WHERE id = ?", msg.room, msg.id);
+        this.touchQ(msg.id);
+        return true;
+      default:
+        return false;
+    }
+  }
+
   // ---------- host actions ----------
+
+  /** Checks everything first, then saves, so a bad value never leaves settings half-changed. */
+  private applySettings(s: Partial<Settings>) {
+    const cur = { ...this.ev!.settings };
+    for (const k of BOOL_SETTINGS) if (typeof s[k] === "boolean") cur[k] = s[k]!;
+    if (s.identity && IDENTITIES.includes(s.identity)) cur.identity = s.identity;
+    if (s.theme && THEMES.includes(s.theme)) cur.theme = s.theme;
+    if (s.screen === "light" || s.screen === "dark") cur.screen = s.screen;
+    if (s.profanity && PROFANITY.includes(s.profanity)) cur.profanity = s.profanity;
+    if (s.blockedWords !== undefined) cur.blockedWords = cleanBlockedWords(s.blockedWords);
+    if (s.logo !== undefined) cur.logo = isMediaId(s.logo) ? s.logo : null;
+    const time = (v: unknown) => (v === null ? null : typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : undefined);
+    for (const k of ["qaOpensAt", "qaClosesAt", "deleteAt"] as const) {
+      if (!(k in s)) continue;
+      const t = time(s[k]);
+      if (t !== undefined) cur[k] = t;
+    }
+    if (cur.qaOpensAt && cur.qaClosesAt && cur.qaClosesAt <= cur.qaOpensAt) throw new UserError("Closing time must be after opening time");
+    if (cur.identity !== this.ev!.settings.identity) this.dirtyAllMe = true; // "joined" depends on this
+    this.ev!.settings = cur;
+  }
 
   private handleHost(msg: ClientMsg) {
     const ev = this.ev!;
@@ -597,15 +974,13 @@ export class EventRoom extends DurableObject<Env> {
         ev.title = clean(msg.title, LIMITS.title) || ev.title;
         return this.saveEvent();
       case "setSettings": {
-        const s = msg.settings ?? {};
-        for (const k of BOOL_SETTINGS) if (typeof s[k] === "boolean") ev.settings[k] = s[k]!;
-        if (s.identity && IDENTITIES.includes(s.identity)) {
-          ev.settings.identity = s.identity;
-          this.dirtyAllMe = true; // "joined" depends on this
-        }
-        if (s.theme && THEMES.includes(s.theme)) ev.settings.theme = s.theme;
-        if (s.screen === "light" || s.screen === "dark") ev.settings.screen = s.screen;
-        return this.saveEvent();
+        const before = JSON.stringify([ev.settings.qaOpensAt, ev.settings.qaClosesAt, ev.settings.deleteAt]);
+        this.applySettings(msg.settings ?? {});
+        // Hiding or showing names changes every question.
+        if (msg.settings && "hideNames" in msg.settings) this.touchAllQuestions();
+        this.saveEvent();
+        if (JSON.stringify([ev.settings.qaOpensAt, ev.settings.qaClosesAt, ev.settings.deleteAt]) !== before) this.ctx.waitUntil(this.scheduleAlarm());
+        return;
       }
       case "setPasscode":
         ev.passcode = normPasscode(msg.passcode);
@@ -613,57 +988,73 @@ export class EventRoom extends DurableObject<Env> {
       case "setPresentMode":
         if (PRESENT_MODES.includes(msg.mode)) ev.presentMode = msg.mode;
         return this.saveEvent();
-
-      case "approve":
-        this.sql.exec("UPDATE questions SET status = 'live' WHERE id = ? AND status = 'pending'", msg.id);
-        return this.touchQ(msg.id);
-      case "answer":
-        this.sql.exec(
-          "UPDATE questions SET status = CASE status WHEN 'answered' THEN 'live' ELSE 'answered' END, highlighted = 0 WHERE id = ? AND status IN ('live','answered')",
-          msg.id,
-        );
-        return this.touchQ(msg.id);
-      case "archive":
-        this.sql.exec("UPDATE questions SET status = CASE status WHEN 'archived' THEN 'live' ELSE 'archived' END, highlighted = 0 WHERE id = ?", msg.id);
-        return this.touchQ(msg.id);
-      case "highlight": {
-        const cur = this.sql.exec<{ highlighted: number }>("SELECT highlighted FROM questions WHERE id = ?", msg.id).toArray()[0];
-        if (!cur) return;
-        for (const r of this.sql.exec<{ id: string }>("UPDATE questions SET highlighted = 0 WHERE highlighted = 1 RETURNING id")) this.touchQ(r.id);
-        if (!cur.highlighted)
-          this.sql.exec("UPDATE questions SET highlighted = 1, status = CASE status WHEN 'pending' THEN 'live' ELSE status END WHERE id = ?", msg.id);
-        return this.touchQ(msg.id);
+      case "newModKey":
+        ev.modKey = newHostKey();
+        for (const ws of this.ctx.getWebSockets("mod")) {
+          try {
+            ws.close(CLOSE.FORBIDDEN, "Moderator link changed");
+          } catch {}
+        }
+        return this.saveEvent();
+      case "setLabels": {
+        ev.labels = cleanLabels(msg.labels, newId);
+        const keep = new Set(ev.labels.map((l) => l.id));
+        for (const q of this.sql.exec<{ id: string; labels: string }>("SELECT id, labels FROM questions WHERE labels != '[]'").toArray()) {
+          const cur = JSON.parse(q.labels) as string[];
+          const next = cur.filter((l) => keep.has(l));
+          if (next.length !== cur.length) {
+            this.sql.exec("UPDATE questions SET labels = ? WHERE id = ?", JSON.stringify(next), q.id);
+            this.touchQ(q.id);
+          }
+        }
+        return this.saveEvent();
       }
-      case "deleteQuestion":
-        return this.removeQuestion(msg.id);
+      case "setRooms": {
+        ev.rooms = this.withMainRoom(cleanRooms(msg.rooms, newId));
+        // Questions in a room that was removed move to the first room.
+        const ids = [...this.roomIds()];
+        for (const r of this.sql.exec<{ id: string }>(`UPDATE questions SET room = ? WHERE room NOT IN (${ids.map(() => "?").join(",")}) RETURNING id`, ids[0], ...ids)) this.touchQ(r.id);
+        return this.saveEvent();
+      }
       case "clearQuestions":
         for (const r of this.sql.exec<{ id: string }>("DELETE FROM questions RETURNING id")) {
           this.deletedQ.add(r.id);
           this.dirtyQ.delete(r.id);
         }
         this.sql.exec("DELETE FROM votes");
+        this.sql.exec("DELETE FROM replies");
         this.dirtyAllMe = true;
         return this.scheduleFlush();
 
       case "savePoll": {
         const d = validatePoll(msg.poll);
         const existing = msg.poll.id ? this.pollRow(msg.poll.id) : null;
-        const cols = [d.type, d.title, JSON.stringify(d.options), JSON.stringify(d.correct), d.multi ? 1 : 0, d.scale, JSON.stringify(d.images), JSON.stringify(d.range), d.timeLimit, JSON.stringify(d.items)];
         if (existing) {
-          const shape = (p: Pick<Poll, "type" | "options" | "range" | "items">) => JSON.stringify([p.type, p.options, p.range, p.items.map((i) => [i.type, i.options, i.range])]);
+          const shape = (p: Pick<Poll, "type" | "options" | "range" | "items" | "axes" | "image">) =>
+            JSON.stringify([p.type, p.options, p.range, p.axes, p.image, p.items.map((i) => [i.type, i.options, i.range, i.axes, i.image])]);
           const structural = shape(existing) !== shape(d);
-          this.sql.exec("UPDATE polls SET type=?, title=?, options=?, correct=?, multi=?, scale=?, images=?, range=?, time_limit=?, items=? WHERE id=?", ...cols, existing.id);
+          this.sql.exec(
+            "UPDATE polls SET type=?, title=?, options=?, correct=?, multi=?, scale=?, images=?, range=?, time_limit=?, items=?, axes=?, image=? WHERE id=?",
+            ...this.pollCols(d),
+            existing.id,
+          );
           if (structural) this.clearResponses(existing.id);
           this.touchP(existing.id);
           this.touchR(existing.id);
           if (existing.type === "quiz" || d.type === "quiz") this.invalidateLb();
-        } else this.insertPoll(cols);
+        } else this.insertPoll(d);
+        return;
+      }
+      case "importPolls": {
+        const list = Array.isArray(msg.polls) ? msg.polls.slice(0, LIMITS.importPolls) : [];
+        const clean = list.map((p) => validatePoll(p)); // all or nothing, so a half-added template never happens
+        for (const d of clean) this.insertPoll(d);
         return;
       }
       case "duplicatePoll": {
         const p = this.pollRow(msg.pollId);
         if (!p) return;
-        this.insertPoll([p.type, `${p.title} (copy)`.slice(0, LIMITS.question), JSON.stringify(p.options), JSON.stringify(p.correct ?? []), p.multi ? 1 : 0, p.scale, JSON.stringify(p.images), JSON.stringify(p.range), p.timeLimit, JSON.stringify(p.items)]);
+        this.insertPoll({ ...p, title: `${p.title} (copy)`.slice(0, LIMITS.question), correct: p.correct ?? [] });
         return;
       }
       case "activatePoll": {
@@ -733,12 +1124,32 @@ export class EventRoom extends DurableObject<Env> {
     }
   }
 
-  private insertPoll(cols: (string | number)[]) {
+  private pollCols(d: CleanPoll): (string | number | null)[] {
+    return [
+      d.type,
+      d.title,
+      JSON.stringify(d.options),
+      JSON.stringify(d.correct),
+      d.multi ? 1 : 0,
+      d.scale,
+      JSON.stringify(d.images),
+      JSON.stringify(d.range),
+      d.timeLimit,
+      JSON.stringify(d.items),
+      JSON.stringify(d.axes),
+      d.image,
+    ];
+  }
+
+  private insertPoll(d: CleanPoll) {
     const id = newId();
     const ord = (this.sql.exec<{ m: number | null }>("SELECT MAX(ord) AS m FROM polls").one().m ?? -1) + 1;
     this.sql.exec(
-      "INSERT INTO polls (type, title, options, correct, multi, scale, images, range, time_limit, items, id, ord, status, show_results, revealed, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'draft', 1, 0, ?)",
-      ...cols, id, ord, Date.now(),
+      "INSERT INTO polls (type, title, options, correct, multi, scale, images, range, time_limit, items, axes, image, id, ord, status, show_results, revealed, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'draft', 1, 0, ?)",
+      ...this.pollCols(d),
+      id,
+      ord,
+      Date.now(),
     );
     this.touchP(id);
   }
@@ -759,6 +1170,7 @@ export class EventRoom extends DurableObject<Env> {
   }
 
   private toPoll(r: PollRow): Poll {
+    const items = (JSON.parse(r.items || "[]") as Partial<Item>[]).map((it) => ({ ...it, axes: it.axes ?? null, image: it.image ?? null }) as Item);
     return {
       id: r.id,
       ord: r.ord,
@@ -770,17 +1182,51 @@ export class EventRoom extends DurableObject<Env> {
       multi: !!r.multi,
       scale: r.scale,
       range: JSON.parse(r.range || "null"),
+      axes: JSON.parse(r.axes || "null"),
+      image: r.image ?? null,
       status: r.status,
       showResults: !!r.show_results,
       revealed: !!r.revealed,
       timeLimit: r.time_limit ?? 0,
       startedAt: r.started_at ?? null,
-      items: JSON.parse(r.items || "[]"),
+      items,
     };
   }
 
-  private toQuestion(r: QuestionRow): Question {
-    return { id: r.id, text: r.text, name: r.name, ts: r.ts, votes: r.votes, downs: r.downs ?? 0, status: r.status, highlighted: !!r.highlighted, edited: !!r.edited };
+  /** Replies grouped by question. `ids` null = all questions. */
+  private repliesFor(ids: string[] | null): Map<string, Reply[]> {
+    const m = new Map<string, Reply[]>();
+    const add = (r: ReplyRow) => {
+      const list = m.get(r.qid) ?? [];
+      list.push({ id: r.id, text: r.text, name: r.name, ts: r.ts, official: !!r.official });
+      m.set(r.qid, list);
+    };
+    if (ids === null) for (const r of this.sql.exec<ReplyRow>("SELECT * FROM replies ORDER BY ts")) add(r);
+    else
+      for (let i = 0; i < ids.length; i += 90) {
+        const chunk = ids.slice(i, i + 90);
+        for (const r of this.sql.exec<ReplyRow>(`SELECT * FROM replies WHERE qid IN (${chunk.map(() => "?").join(",")}) ORDER BY ts`, ...chunk)) add(r);
+      }
+    return m;
+  }
+
+  private toQuestion(r: QuestionRow, role: Role, replies: Reply[]): Question {
+    const hide = this.ev!.settings.hideNames && !isStaff(role);
+    const mask = this.ev!.settings.profanity === "review" && !isStaff(role);
+    return {
+      id: r.id,
+      text: mask ? maskWords(r.text, this.ev!.settings.blockedWords).text : r.text,
+      name: hide ? "" : r.name,
+      ts: r.ts,
+      votes: r.votes,
+      downs: r.downs ?? 0,
+      status: r.status,
+      highlighted: !!r.highlighted,
+      edited: !!r.edited,
+      room: r.room ?? MAIN_ROOM,
+      labels: JSON.parse(r.labels || "[]"),
+      replies: hide ? replies.map((x) => (x.official ? x : { ...x, name: "" })) : replies,
+    };
   }
 
   /** Full tally for a poll (cached until a response changes). */
@@ -800,14 +1246,16 @@ export class EventRoom extends DurableObject<Env> {
     const rows: Cell[][] = [];
     const add = (poll: string, it: Item, r: Results, status: string) => {
       const kind = it.type;
-      if (r.scores) it.options.map((o, i) => [o, r.scores![i]] as const).sort((a, b) => b[1] - a[1]).forEach(([o, s]) => rows.push([poll, kind, `${o} (avg points)`, s, status]));
+      if (r.scores) {
+        const unit = it.type === "points" ? "avg points given" : "avg ranking points";
+        it.options.map((o, i) => [o, r.scores![i]] as const).sort((a, b) => b[1] - a[1]).forEach(([o, s]) => rows.push([poll, kind, `${o} (${unit})`, s, status]));
+      } else if (r.pairs) {
+        const [ax, ay] = it.axes ?? ["X", "Y"];
+        it.options.forEach((o, i) => rows.push([poll, kind, `${o} (${ax} / ${ay})`, `${r.pairs![i][0]} / ${r.pairs![i][1]}`, status]));
+      } else if (r.pins) rows.push([poll, kind, "Pins dropped", r.pins.length, status]);
       else if (r.counts) {
         const labels =
-          it.type === "rating"
-            ? r.counts.map((_, i) => `${i + 1} stars`)
-            : it.type === "scale"
-              ? r.counts.map((_, i) => String((it.range?.min ?? 1) + i))
-              : it.options;
+          it.type === "rating" ? r.counts.map((_, i) => `${i + 1} stars`) : it.type === "scale" ? r.counts.map((_, i) => String((it.range?.min ?? 1) + i)) : it.options;
         labels.forEach((o, i) => rows.push([poll, kind, o, r.counts![i], status]));
         if (r.avg !== undefined) rows.push([poll, kind, "Average", r.avg, status]);
       } else if (r.words) r.words.forEach(([w, c]) => rows.push([poll, kind, w, c, status]));
@@ -817,13 +1265,7 @@ export class EventRoom extends DurableObject<Env> {
     for (const p of this.allPolls()) {
       const r = this.results(p.id);
       if (p.type === "survey") p.items.forEach((it, i) => add(`${p.title} — ${it.title}`, it, r.items?.[i] ?? { total: 0 }, p.status));
-      else
-        add(
-          p.title,
-          { ...p, options: p.options.map((o, i) => (p.correct?.includes(i) ? `${o} ✓` : o)) } as Item,
-          r,
-          p.status,
-        );
+      else add(p.title, { ...p, options: p.options.map((o, i) => (p.correct?.includes(i) ? `${o} ✓` : o)) } as unknown as Item, r, p.status);
     }
     return rows;
   }
@@ -892,6 +1334,7 @@ export class EventRoom extends DurableObject<Env> {
       votes,
       downs,
       questions: this.sql.exec<{ id: string }>("SELECT id FROM questions WHERE pid = ?", pid).toArray().map((r) => r.id),
+      replies: this.sql.exec<{ id: string }>("SELECT id FROM replies WHERE pid = ?", pid).toArray().map((r) => r.id),
       responses,
       quiz,
     };
@@ -899,20 +1342,25 @@ export class EventRoom extends DurableObject<Env> {
 
   private metaView(role: Role): Meta {
     const ev = this.ev!;
+    const settings = { ...ev.settings };
+    // Attendees don't need the host's private word list.
+    if (role !== "host") settings.blockedWords = [];
     return {
       code: ev.code,
       title: ev.title,
-      settings: { ...ev.settings },
+      settings,
       presentMode: ev.presentMode,
       activePollId: ev.activePollId,
-      ...(role === "host" ? { passcode: ev.passcode } : {}),
+      labels: ev.labels,
+      rooms: ev.rooms,
+      ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey } : {}),
     };
   }
 
   // ---------- who sees what ----------
 
   private questionVisible(q: { status: QuestionStatus; pid?: string }, role: Role, pid?: string): boolean {
-    if (role === "host") return true;
+    if (isStaff(role)) return true;
     if (q.status === "archived") return false;
     if (q.status === "pending") return !!pid && q.pid === pid;
     return true;
@@ -938,17 +1386,17 @@ export class EventRoom extends DurableObject<Env> {
   }
 
   private snapshot(role: Role, pid: string) {
-    const questions = this.sql
+    const rows = this.sql
       .exec<QuestionRow>("SELECT * FROM questions ORDER BY ts")
       .toArray()
-      .filter((q) => this.questionVisible(q, role, pid))
-      .map((q) => this.toQuestion(q));
+      .filter((q) => this.questionVisible(q, role, pid));
+    const replies = this.repliesFor(null);
     const polls = this.allPolls().filter((p) => this.pollVisible(p, role));
     const results: Record<string, Results> = {};
     for (const p of polls) if (p.status !== "draft") results[p.id] = this.resultsView(p, role);
     return {
       meta: this.metaView(role),
-      questions,
+      questions: rows.map((q) => this.toQuestion(q, role, replies.get(q.id) ?? [])),
       polls: polls.map((p) => this.pollView(p, role)),
       results,
       leaderboard: this.leaderboard().board,
@@ -956,10 +1404,30 @@ export class EventRoom extends DurableObject<Env> {
     };
   }
 
+  // ---------- analytics ----------
+
+  private track(kind: Activity) {
+    const key = `${Math.floor(Date.now() / 60_000)}|${kind}`;
+    this.activity.set(key, (this.activity.get(key) ?? 0) + 1);
+    this.scheduleFlush();
+  }
+
+  private saveActivity() {
+    for (const [key, n] of this.activity) {
+      const [minute, kind] = key.split("|");
+      this.sql.exec("INSERT INTO timeline (minute, kind, n) VALUES (?,?,?) ON CONFLICT(minute, kind) DO UPDATE SET n = n + excluded.n", Number(minute), kind, n);
+    }
+    this.activity.clear();
+  }
+
   // ---------- batching and sending ----------
 
   private touchQ(id: string) {
     this.dirtyQ.add(id);
+    this.scheduleFlush();
+  }
+  private touchAllQuestions() {
+    for (const r of this.sql.exec<{ id: string }>("SELECT id FROM questions")) this.dirtyQ.add(r.id);
     this.scheduleFlush();
   }
   private touchP(id: string) {
@@ -987,6 +1455,7 @@ export class EventRoom extends DurableObject<Env> {
   /** Sends every change since the last flush, as one small message per role. */
   flush() {
     if (!this.ev) return;
+    this.saveActivity();
     const qRows: QuestionRow[] = [];
     const ids = [...this.dirtyQ];
     for (let i = 0; i < ids.length; i += 90) {
@@ -996,6 +1465,7 @@ export class EventRoom extends DurableObject<Env> {
     // A question that was touched but no longer exists counts as deleted.
     const found = new Set(qRows.map((q) => q.id));
     for (const id of this.dirtyQ) if (!found.has(id)) this.deletedQ.add(id);
+    const replies = qRows.length ? this.repliesFor(qRows.map((q) => q.id)) : new Map<string, Reply[]>();
 
     const polls = [...new Set([...this.dirtyP, ...this.dirtyR])].map((id) => this.pollRow(id)).filter((p): p is Poll => !!p);
     for (const id of this.dirtyP) if (!polls.find((p) => p.id === id)) this.deletedP.add(id);
@@ -1004,7 +1474,7 @@ export class EventRoom extends DurableObject<Env> {
     const base = (role: Role): Op[] => {
       const ops: Op[] = [];
       if (this.dirtyMeta) ops.push({ k: "meta", d: this.metaView(role) });
-      for (const q of qRows) ops.push(this.questionVisible(q, role) ? { k: "q", d: this.toQuestion(q) } : { k: "q-", id: q.id });
+      for (const q of qRows) ops.push(this.questionVisible(q, role) ? { k: "q", d: this.toQuestion(q, role, replies.get(q.id) ?? []) } : { k: "q-", id: q.id });
       for (const id of this.deletedQ) ops.push({ k: "q-", id });
       for (const p of polls) {
         const visible = this.pollVisible(p, role);
@@ -1017,26 +1487,27 @@ export class EventRoom extends DurableObject<Env> {
     };
 
     for (const role of ROLES) {
+      const sockets = this.ctx.getWebSockets(role);
+      if (!sockets.length) continue;
       const ops = base(role);
       if (!ops.length) continue;
       const msg = JSON.stringify({ type: "patch", ops } satisfies ServerMsg);
-      for (const ws of this.ctx.getWebSockets(role)) this.sendRaw(ws, msg);
+      for (const ws of sockets) this.sendRaw(ws, msg);
     }
 
     // Authors see their own questions while they wait for approval.
     const pendingByAuthor = new Map<string, Question[]>();
-    for (const q of qRows) if (q.status === "pending") pendingByAuthor.set(q.pid, [...(pendingByAuthor.get(q.pid) ?? []), this.toQuestion(q)]);
+    for (const q of qRows)
+      if (q.status === "pending") pendingByAuthor.set(q.pid, [...(pendingByAuthor.get(q.pid) ?? []), this.toQuestion(q, "attendee", replies.get(q.id) ?? [])]);
     for (const [pid, qs] of pendingByAuthor) {
       const msg = JSON.stringify({ type: "patch", ops: qs.map((d) => ({ k: "q", d })) } satisfies ServerMsg);
       for (const ws of this.ctx.getWebSockets(`pid:${pid}`)) {
-        if ((ws.deserializeAttachment() as Attachment).role !== "host") this.sendRaw(ws, msg);
+        if (!isStaff((ws.deserializeAttachment() as Attachment).role)) this.sendRaw(ws, msg);
       }
     }
 
     // Personal data (own votes, answers, quiz score).
-    const mePids = this.dirtyAllMe
-      ? new Set(this.ctx.getWebSockets().map((ws) => (ws.deserializeAttachment() as Attachment).pid))
-      : this.dirtyMe;
+    const mePids = this.dirtyAllMe ? new Set(this.ctx.getWebSockets().map((ws) => (ws.deserializeAttachment() as Attachment).pid)) : this.dirtyMe;
     for (const pid of mePids) {
       const sockets = this.ctx.getWebSockets(`pid:${pid}`);
       if (!sockets.length) continue;
@@ -1072,9 +1543,14 @@ export class EventRoom extends DurableObject<Env> {
     if (this.onlineTimer) return;
     this.onlineTimer = setTimeout(() => {
       this.onlineTimer = null;
-      const msg = JSON.stringify({ type: "online", n: this.onlineCount() } satisfies ServerMsg);
-      for (const ws of this.ctx.getWebSockets("host")) this.sendRaw(ws, msg);
-      for (const ws of this.ctx.getWebSockets("present")) this.sendRaw(ws, msg);
+      if (!this.ev) return;
+      const n = this.onlineCount();
+      if (n > this.ev.stats.peakOnline) {
+        this.ev.stats = { peakOnline: n, peakAt: Date.now() };
+        this.persistEvent();
+      }
+      const msg = JSON.stringify({ type: "online", n } satisfies ServerMsg);
+      for (const role of ["host", "mod", "present"] as const) for (const ws of this.ctx.getWebSockets(role)) this.sendRaw(ws, msg);
     }, ONLINE_MS);
   }
 

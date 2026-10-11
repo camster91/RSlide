@@ -9,7 +9,7 @@
     "deploy": "vite build && wrangler deploy",
     "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.web.json && tsc -p tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "tsx tests/e2e/e2e.ts",
+    "test:e2e": "tsx tests/e2e/e2e.ts && tsx tests/e2e/features.ts",
     "test:load": "tsx tests/e2e/load.ts"
   },
   "author": "Cameron Ashley",

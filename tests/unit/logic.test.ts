@@ -13,6 +13,10 @@ import {
   UserError,
   validatePoll,
   validateResponse,
+  maskWords,
+  cleanBlockedWords,
+  cleanLabels,
+  cleanRooms,
 } from "../../src/worker/logic";
 import { buildXlsx } from "../../src/worker/xlsx";
 
@@ -102,8 +106,8 @@ describe("validateResponse", () => {
       ...mc,
       type: "survey" as const,
       items: [
-        { type: "rating" as const, title: "a", options: [], images: [], multi: false, scale: 5, range: null },
-        { type: "open" as const, title: "b", options: [], images: [], multi: false, scale: 0, range: null },
+        { type: "rating" as const, title: "a", options: [], images: [], multi: false, scale: 5, range: null, axes: null, image: null },
+        { type: "open" as const, title: "b", options: [], images: [], multi: false, scale: 0, range: null, axes: null, image: null },
       ],
     };
     expect(validateResponse(survey, [4, null])).toEqual([4, null]);
@@ -140,8 +144,8 @@ describe("tally", () => {
   });
   it("tallies each survey question, ignoring skips", () => {
     const items = [
-      { type: "rating" as const, title: "a", options: [], images: [], multi: false, scale: 5, range: null },
-      { type: "open" as const, title: "b", options: [], images: [], multi: false, scale: 0, range: null },
+      { type: "rating" as const, title: "a", options: [], images: [], multi: false, scale: 5, range: null, axes: null, image: null },
+      { type: "open" as const, title: "b", options: [], images: [], multi: false, scale: 0, range: null, axes: null, image: null },
     ];
     const r = tally({ ...base, type: "survey", items }, [[5, "great"], [3, null]]);
     expect(r.total).toBe(2);
@@ -204,5 +208,68 @@ describe("buildXlsx", () => {
     const sheet = strFromU8(files["xl/worksheets/sheet1.xml"]);
     expect(sheet).toContain("Is 5 &lt; 6 &amp; &quot;true&quot;?");
     expect(sheet).toContain("<v>3</v>");
+  });
+});
+
+describe("phase 2 poll types", () => {
+  const base = { multi: false, scale: 0, range: null, items: [] };
+  it("100 points: shares must add up to 100 or less", () => {
+    const p = { ...base, type: "points" as const, options: ["a", "b", "c"] };
+    expect(validateResponse(p, [50, 30, 20])).toEqual([50, 30, 20]);
+    expect(validateResponse(p, [10, 0, 0])).toEqual([10, 0, 0]);
+    expect(() => validateResponse(p, [60, 50, 0])).toThrow("only have 100");
+    expect(() => validateResponse(p, [0, 0, 0])).toThrow("at least one");
+    expect(() => validateResponse(p, [-5, 50, 0])).toThrow();
+    expect(tally(p, [[50, 50, 0], [100, 0, 0]]).scores).toEqual([75, 25, 0]);
+  });
+  it("2x2 grid: every option needs an x and y inside the range", () => {
+    const d = validatePoll({ type: "grid", title: "Plot", options: ["a", "b"], correct: [], multi: false, axes: ["Value", ""] });
+    expect(d.axes).toEqual(["Value", "Effort"]);
+    expect(d.range).toMatchObject({ min: 1, max: 10 });
+    const p = { ...base, type: "grid" as const, options: ["a", "b"], range: d.range };
+    expect(validateResponse(p, [[1, 10], [5, 5]])).toEqual([[1, 10], [5, 5]]);
+    expect(() => validateResponse(p, [[1, 11], [5, 5]])).toThrow("grid");
+    expect(() => validateResponse(p, [[1, 2]])).toThrow("grid");
+    expect(tally(p, [[[2, 4], [6, 6]], [[4, 8], [6, 7]]]).pairs).toEqual([[3, 6], [6, 6.5]]);
+  });
+  it("pin on image: needs a picture, and taps between 0 and 1", () => {
+    expect(() => validatePoll({ type: "pin", title: "Where?", options: [], correct: [], multi: false })).toThrow("picture");
+    expect(validatePoll({ type: "pin", title: "Where?", options: [], correct: [], multi: false, image: "aaaaaaaaaaaa" }).image).toBe("aaaaaaaaaaaa");
+    const p = { ...base, type: "pin" as const, options: [] };
+    expect(validateResponse(p, [0.12345, 1])).toEqual([0.123, 1]);
+    expect(() => validateResponse(p, [1.2, 0])).toThrow("pin");
+    expect(tally(p, [[0.1, 0.2], [0.3, 0.4]]).pins).toEqual([[0.3, 0.4], [0.1, 0.2]]);
+  });
+  it("describes the new answers for exports", () => {
+    expect(describeAnswer({ type: "points", options: ["a", "b"] }, [70, 0])).toBe("a: 70");
+    expect(describeAnswer({ type: "pin", options: [] }, [0.5, 0.25])).toBe("50% across, 25% down");
+  });
+});
+
+describe("word filter", () => {
+  it("masks whole words only, keeping the first letter", () => {
+    expect(maskWords("This is shit, really")).toEqual({ text: "This is s***, really", hit: true });
+    expect(maskWords("A classic Scunthorpe assessment").hit).toBe(false);
+  });
+  it("catches plurals and capitals", () => expect(maskWords("Damns and SHITS").text).toBe("D**** and S****"));
+  it("uses the host's own words", () => {
+    expect(maskWords("Ask about competitorX now", ["competitorx"]).text).toBe("Ask about c********** now");
+  });
+  it("cleans the host's word list", () => expect(cleanBlockedWords(" Foo, bar\nfoo ,, ")).toEqual(["foo", "bar"]));
+});
+
+describe("labels and rooms", () => {
+  let n = 0;
+  const id = () => `id${++n}`;
+  it("keeps up to 12 unique labels with valid colours", () => {
+    const l = cleanLabels([{ name: "Finance", color: "green" }, { name: "finance" }, { name: "  " }, { name: "HR", color: "pink" }], id);
+    expect(l.map((x) => x.name)).toEqual(["Finance", "HR"]);
+    expect(l[0].color).toBe("green");
+    expect(l[1].color).not.toBe("pink");
+  });
+  it("keeps room IDs so questions stay in their room", () => {
+    const r = cleanRooms([{ id: "main", name: "Main stage" }, { name: "Workshop" }, { name: "" }], id);
+    expect(r[0]).toEqual({ id: "main", name: "Main stage" });
+    expect(r).toHaveLength(2);
   });
 });

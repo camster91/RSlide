@@ -1,8 +1,11 @@
 // Pure helpers used by the event room. No Cloudflare APIs here, so they're easy to unit test.
 import {
   ITEM_TYPES,
+  LABEL_COLORS,
   LIMITS,
+  POINTS_BUDGET,
   POLL_TYPES,
+  type LabelColor,
   type Item,
   type ItemDraft,
   type ItemType,
@@ -62,7 +65,7 @@ export function validateItem(d: ItemDraft | PollDraft, allowed: readonly (ItemTy
   const type = (allowed as string[]).includes(d?.type) ? (d.type as Item["type"]) : "multiple";
   const title = clean(d?.title, LIMITS.question);
   if (!title) throw new UserError("Each question needs a title");
-  const needsOptions = type === "multiple" || type === "quiz" || type === "ranking";
+  const needsOptions = type === "multiple" || type === "quiz" || type === "ranking" || type === "points" || type === "grid";
   let options: string[] = [];
   let images: (string | null)[] = [];
   if (needsOptions) {
@@ -77,6 +80,16 @@ export function validateItem(d: ItemDraft | PollDraft, allowed: readonly (ItemTy
     images = pairs.map((x) => x.img);
     if (options.length < 2) throw new UserError(`"${title.slice(0, 40)}" needs at least 2 options`);
   }
+  let axes: [string, string] | null = null;
+  if (type === "grid") {
+    const a = Array.isArray(d.axes) ? d.axes : [];
+    axes = [clean(a[0], 30) || "Impact", clean(a[1], 30) || "Effort"];
+  }
+  let image: string | null = null;
+  if (type === "pin") {
+    if (!isMediaId(d.image)) throw new UserError(`"${title.slice(0, 40)}" needs a picture to pin on`);
+    image = d.image;
+  }
   return {
     type,
     title,
@@ -84,7 +97,9 @@ export function validateItem(d: ItemDraft | PollDraft, allowed: readonly (ItemTy
     images: images.some(Boolean) ? images : [],
     multi: type === "multiple" && !!d.multi,
     scale: type === "rating" ? 5 : 0,
-    range: type === "scale" ? cleanRange(d.range) : null,
+    range: type === "scale" ? cleanRange(d.range) : type === "grid" ? cleanRange({ min: 1, max: 10, ...d.range, minLabel: "", maxLabel: "" }) : null,
+    axes,
+    image,
   };
 }
 
@@ -98,7 +113,7 @@ export function validatePoll(draft: PollDraft): CleanPoll {
     if (!raw.length) throw new UserError("Add at least one question to the survey");
     if (raw.length > LIMITS.surveyItems) throw new UserError(`Surveys can have up to ${LIMITS.surveyItems} questions`);
     const items = raw.map((it) => validateItem(it, ITEM_TYPES));
-    return { type, title: clean(draft.title, LIMITS.question), options: [], images: [], multi: false, scale: 0, range: null, correct: [], timeLimit: 0, items };
+    return { type, title: clean(draft.title, LIMITS.question), options: [], images: [], multi: false, scale: 0, range: null, axes: null, image: null, correct: [], timeLimit: 0, items };
   }
 
   const base = validateItem({ ...draft, type: type as ItemType }, [...ITEM_TYPES, "quiz"]);
@@ -119,6 +134,27 @@ export function validatePoll(draft: PollDraft): CleanPoll {
 /** Validates an answer to one question. */
 export function validateItemResponse(p: Pick<Item, "type" | "options" | "multi" | "scale" | "range">, value: unknown): ResponseValue {
   switch (p.type) {
+    case "points": {
+      const arr = Array.isArray(value) ? value.map(Number) : [];
+      if (arr.length !== p.options.length || arr.some((n) => !Number.isInteger(n) || n < 0)) throw new UserError("Share out your points");
+      const sum = arr.reduce((a, b) => a + b, 0);
+      if (sum === 0) throw new UserError("Give at least one point");
+      if (sum > POINTS_BUDGET) throw new UserError(`You only have ${POINTS_BUDGET} points`);
+      return arr;
+    }
+    case "grid": {
+      const r = p.range ?? { min: 1, max: 10 };
+      const arr = Array.isArray(value) ? value : [];
+      const ok = (n: unknown) => Number.isInteger(n) && (n as number) >= r.min && (n as number) <= r.max;
+      const pairs = arr.map((xy) => (Array.isArray(xy) ? [Number(xy[0]), Number(xy[1])] : []) as number[]);
+      if (pairs.length !== p.options.length || pairs.some((xy) => xy.length !== 2 || !ok(xy[0]) || !ok(xy[1]))) throw new UserError("Place every option on the grid");
+      return pairs as [number, number][];
+    }
+    case "pin": {
+      const xy = Array.isArray(value) ? value.map(Number) : [];
+      if (xy.length !== 2 || xy.some((n) => !Number.isFinite(n) || n < 0 || n > 1)) throw new UserError("Tap the picture to drop your pin");
+      return [Math.round(xy[0] * 1000) / 1000, Math.round(xy[1] * 1000) / 1000];
+    }
     case "multiple":
     case "quiz": {
       const arr = (Array.isArray(value) ? value : [value]).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < p.options.length);
@@ -175,7 +211,20 @@ export function validateResponse(p: Pick<Poll, "type" | "options" | "multi" | "s
 /** Tallies all responses for one question. */
 export function tallyItem(p: Pick<Item, "type" | "options" | "scale" | "range">, responses: ResponseValue[]): Results {
   const total = responses.length;
+  const avg2 = (sum: number) => (total ? Math.round((sum / total) * 10) / 10 : 0);
   switch (p.type) {
+    case "points": {
+      const sums = p.options.map(() => 0);
+      for (const r of responses) (r as number[]).forEach((n, i) => i < sums.length && (sums[i] += n));
+      return { total, scores: sums.map(avg2) };
+    }
+    case "grid": {
+      const sums = p.options.map(() => [0, 0]);
+      for (const r of responses) (r as [number, number][]).forEach((xy, i) => i < sums.length && ((sums[i][0] += xy[0]), (sums[i][1] += xy[1])));
+      return { total, pairs: sums.map(([x, y]) => [avg2(x), avg2(y)] as [number, number]) };
+    }
+    case "pin":
+      return { total, pins: (responses as unknown as [number, number][]).slice(-500).reverse() };
     case "multiple":
     case "quiz": {
       const counts = p.options.map(() => 0);
@@ -271,6 +320,12 @@ export function toCsv(rows: (string | number)[][]): string {
 export function describeAnswer(p: { type: string; options: string[] }, v: unknown): string {
   if (v === null || v === undefined) return "";
   switch (p.type) {
+    case "points":
+      return (v as number[]).map((n, i) => (n ? `${p.options[i] ?? "?"}: ${n}` : "")).filter(Boolean).join("; ");
+    case "grid":
+      return (v as [number, number][]).map((xy, i) => `${p.options[i] ?? "?"} (${xy[0]}, ${xy[1]})`).join("; ");
+    case "pin":
+      return `${Math.round((v as number[])[0] * 100)}% across, ${Math.round((v as number[])[1] * 100)}% down`;
     case "multiple":
     case "quiz":
       return (v as number[]).map((i) => p.options[i] ?? "?").join("; ");
@@ -281,4 +336,75 @@ export function describeAnswer(p: { type: string; options: string[] }, v: unknow
     default:
       return String(v);
   }
+}
+
+// ---------- word filter ----------
+
+/** Common English swear words. Hosts can add their own in settings. */
+const BAD_WORDS = [
+  "arse", "arsehole", "ass", "asshole", "bastard", "bitch", "bollocks", "bullshit", "cock", "crap", "cunt", "damn",
+  "dick", "dickhead", "douche", "fuck", "fucker", "fucking", "goddamn", "jackass", "motherfucker", "piss", "prick",
+  "pussy", "shit", "shitty", "slut", "twat", "wanker", "whore",
+];
+const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const filterCache = new Map<string, RegExp>();
+
+function wordRegex(extra: readonly string[]): RegExp {
+  const key = extra.join("\u0000");
+  let re = filterCache.get(key);
+  if (!re) {
+    const words = [...new Set([...BAD_WORDS, ...extra.map((w) => w.toLowerCase())])].filter(Boolean).sort((a, b) => b.length - a.length);
+    // Whole words only, so "class" or "Scunthorpe" are left alone. Plural/-s endings are caught too.
+    re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${words.map(esc).join("|")})(?:s|es)?(?![\\p{L}\\p{N}])`, "giu");
+    if (filterCache.size > 50) filterCache.clear();
+    filterCache.set(key, re);
+  }
+  re.lastIndex = 0;
+  return re;
+}
+
+/** Replaces filtered words with asterisks (keeping the first letter). Returns whether anything matched. */
+export function maskWords(text: string, extra: readonly string[] = []): { text: string; hit: boolean } {
+  let hit = false;
+  const out = text.replace(wordRegex(extra), (m) => {
+    hit = true;
+    return m[0] + "*".repeat(Math.max(2, m.length - 1));
+  });
+  return { text: out, hit };
+}
+
+export function cleanBlockedWords(words: unknown): string[] {
+  const list = (Array.isArray(words) ? words : String(words ?? "").split(/[\n,]/)).map((w) => clean(w, 30).toLowerCase()).filter(Boolean);
+  return [...new Set(list)].slice(0, LIMITS.blockedWords);
+}
+
+// ---------- labels and rooms ----------
+
+export function cleanLabels(list: unknown, newId: () => string): { id: string; name: string; color: LabelColor }[] {
+  const arr = Array.isArray(list) ? list : [];
+  const seen = new Set<string>();
+  const out: { id: string; name: string; color: LabelColor }[] = [];
+  for (const l of arr) {
+    const name = clean(l?.name, LIMITS.label);
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    const id = typeof l?.id === "string" && /^[a-z0-9]{1,12}$/.test(l.id) ? l.id : newId();
+    out.push({ id, name, color: (LABEL_COLORS as readonly string[]).includes(l?.color) ? l.color : LABEL_COLORS[out.length % LABEL_COLORS.length] });
+    if (out.length >= LIMITS.labels) break;
+  }
+  return out;
+}
+
+export function cleanRooms(list: unknown, newId: () => string): { id: string; name: string }[] {
+  const arr = Array.isArray(list) ? list : [];
+  const out: { id: string; name: string }[] = [];
+  for (const r of arr) {
+    const name = clean(r?.name, LIMITS.room);
+    if (!name) continue;
+    const id = typeof r?.id === "string" && /^[a-z0-9]{1,12}$/.test(r.id) ? r.id : newId();
+    if (out.some((x) => x.id === id)) continue;
+    out.push({ id, name });
+    if (out.length >= LIMITS.rooms) break;
+  }
+  return out;
 }
