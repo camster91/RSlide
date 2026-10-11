@@ -97,6 +97,8 @@ ok(await host.until(() => host.snap.polls.find((p) => p.id === mc.id)?.status ==
 ok(await a.until(() => a.snap.polls.length === 1 && a.snap.polls[0].id === quiz.id), "attendee only sees the active poll");
 ok(a.snap.polls[0].correct === undefined, "quiz answer hidden before reveal");
 a.send({ type: "respond", pollId: quiz.id, value: [1] });
+// Wait for the answer to land before revealing, or the reveal can win the race and refuse it.
+await a.until(() => JSON.stringify(a.state.me!.responses[quiz.id]) === "[1]");
 host.send({ type: "revealAnswer", pollId: quiz.id });
 ok(await a.until(() => a.snap.polls[0]?.correct?.join() === "1"), "quiz reveal");
 
