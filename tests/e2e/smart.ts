@@ -73,10 +73,13 @@ ok(await host.until(() => !host.snap.questions.some((q) => q.id === other.id)), 
 // Merging into a pending question approves it; repeats of the removed one move to the kept one.
 host.send({ type: "setSettings", settings: { moderation: true } });
 await a.until(() => a.snap.meta.settings.moderation);
-a.send({ type: "ask", text: "Is there a recording of this session?" });
-b.send({ type: "ask", text: "Will this session be recorded?" });
-c.send({ type: "ask", text: "Will the session be recorded and posted?" });
-ok(await host.until(() => host.snap.questions.filter((q) => q.status === "pending").length === 3), "three pending questions");
+// Asked one after another, so the first one is the "original".
+for (const [who, text] of [[a, "Is there a recording of this session?"], [b, "Will this session be recorded?"], [c, "Will the session be recorded and posted?"]] as const) {
+  const n = host.snap.questions.length;
+  who.send({ type: "ask", text });
+  await host.until(() => host.snap.questions.length === n + 1);
+}
+ok(host.snap.questions.filter((q) => q.status === "pending").length === 3, "three pending questions");
 const [p1, p2, p3] = ["Is there", "Will this", "Will the session"].map((t) => host.snap.questions.find((q) => q.text.startsWith(t))!);
 ok(p2.dupOf === p1.id && p3.dupOf === p1.id, "pending questions are checked for repeats too");
 host.send({ type: "mergeQuestion", id: p1.id, into: p2.id });
