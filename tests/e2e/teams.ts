@@ -26,6 +26,7 @@ await sleep(250);
 ok(host.snap.meta.teams.length === 0, "only the host can set teams");
 host.send({ type: "setTeams", teams: [{ name: "Owls", color: "blue" }, { name: "Foxes", color: "amber" }, { name: "owls", color: "red" }, { name: "", color: "red" }] });
 ok(await a.until(() => a.snap.meta.teams.length === 2), "attendees see the teams");
+await host.until(() => host.snap.meta.teams.length === 2);
 const [owls, foxes] = host.snap.meta.teams;
 ok(owls.name === "Owls" && foxes.name === "Foxes" && foxes.color === "amber", "teams are cleaned (no empty or duplicate names)");
 
