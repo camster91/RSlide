@@ -16,6 +16,9 @@ import {
   type Question,
   type Room,
   type Settings,
+  type ApiSetup,
+  type WebhookEvent,
+  WEBHOOK_EVENTS,
   type ThemeName,
 } from "../../shared/protocol";
 import { resultsOf, sortQuestions } from "../../shared/store";
@@ -874,6 +877,9 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           {t("Copy embed code")}
         </button>
 
+        <h3>{t("API and webhooks")}</h3>
+        <ApiSettings code={code} api={meta.api ?? { key: null, webhook: null }} send={send} />
+
         <h3>{t("Look")}</h3>
         <div class="logo-pick">
           {settings.logo ? <img src={mediaUrl(code, settings.logo)} alt={t("Event logo")} /> : <span class="muted small">{t("No logo")}</span>}
@@ -1010,6 +1016,127 @@ function LabelsEditor({ labels, onSave, teams = false }: { labels: Label[]; onSa
         <input class="input" maxLength={24} placeholder={teams ? t("New team, e.g. Red team") : t("New label, e.g. Finance")} value={name} onInput={(e) => setName(e.currentTarget.value)} />
         <button class="btn sm">{t("Add")}</button>
       </form>
+    </div>
+  );
+}
+
+const HOOK_LABEL: Record<WebhookEvent, string> = {
+  "question.created": t("New question"),
+  "question.updated": t("Question changed (approved, answered, highlighted…)"),
+  "question.deleted": t("Question removed"),
+  "reply.created": t("New reply"),
+  "poll.launched": t("Poll launched"),
+  "poll.closed": t("Poll closed"),
+  "poll.revealed": t("Quiz answer revealed"),
+  "response.created": t("Every poll answer (busy!)"),
+};
+
+function hookError(last: { status: number; error?: string }): string {
+  if (last.error === "No answer within 8 seconds") return t("No answer within 8 seconds");
+  if (last.error === "Couldn't reach that address") return t("Couldn't reach that address");
+  return t("The server answered {status}", { status: last.status });
+}
+
+function ApiSettings({ code, api, send }: { code: string; api: ApiSetup; send: Send }) {
+  const [url, setUrl] = useState(api.webhook?.url ?? "");
+  const [events, setEvents] = useState<WebhookEvent[]>(api.webhook?.events ?? WEBHOOK_EVENTS.filter((e) => e !== "response.created"));
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    setUrl(api.webhook?.url ?? "");
+    if (api.webhook) setEvents(api.webhook.events);
+  }, [api.webhook?.url, api.webhook?.events.join()]);
+  const base = `${location.origin}/api/v1/events/${code}`;
+  const last = api.webhook?.last;
+  return (
+    <div class="stack-sm api-settings">
+      <p class="muted tiny">
+        {tj("Let other tools read this event's questions, polls and results, or get told when things happen. {docs}", {
+          docs: (
+            <a href="https://github.com/camster91/RSlide/blob/main/docs/API.md" target="_blank" rel="noopener">
+              {t("How to use the API")}
+            </a>
+          ),
+        })}
+      </p>
+      <label class="toggle">
+        <span>
+          {t("Read-only API key")}
+          <span class="muted small" style={{ display: "block" }}>
+            {t("Anyone with the key can read everything in this event, including names and emails.")}
+          </span>
+        </span>
+        <input type="checkbox" checked={!!api.key} onChange={(e) => send({ type: "setApiKey", on: e.currentTarget.checked })} />
+      </label>
+      {api.key && (
+        <>
+          <div class="mod-link">
+            <input class="input mono" readOnly value={show ? api.key : `${api.key.slice(0, 6)}${"•".repeat(24)}`} aria-label={t("API key")} onFocus={(e) => e.currentTarget.select()} />
+            <button class="btn sm ghost" onClick={() => setShow(!show)}>
+              {show ? t("Hide") : t("Show")}
+            </button>
+            <button class="btn sm" onClick={() => copy(api.key!, t("API key copied. Keep it private."))}>
+              {t("Copy")}
+            </button>
+          </div>
+          <p class="muted tiny mono">GET {base}/questions</p>
+          <button class="btn sm ghost" onClick={() => confirm(t("Make a new API key? The old key stops working.")) && send({ type: "setApiKey", on: true })}>
+            {t("Make a new key")}
+          </button>
+        </>
+      )}
+
+      <p class="label">{t("Webhook")}</p>
+      <form
+        class="stack-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!url.trim()) return toast(t("Enter the address that should receive events"));
+          send({ type: "setWebhook", url: url.trim(), events });
+          toast(t("Webhook saved"));
+        }}
+      >
+        <input class="input" type="url" inputMode="url" placeholder="https://example.com/rslide-hook" aria-label={t("Webhook address")} value={url} onInput={(e) => setUrl(e.currentTarget.value)} />
+        <fieldset class="hook-events">
+          <legend class="sr-only">{t("Events to send")}</legend>
+          {WEBHOOK_EVENTS.map((ev) => (
+            <label key={ev} class="check small">
+              <input type="checkbox" checked={events.includes(ev)} onChange={(e) => setEvents(e.currentTarget.checked ? [...events, ev] : events.filter((x) => x !== ev))} />
+              {HOOK_LABEL[ev]}
+            </label>
+          ))}
+        </fieldset>
+        <div class="row">
+          <button class="btn sm">{api.webhook ? t("Save webhook") : t("Add webhook")}</button>
+          {api.webhook && (
+            <>
+              <button type="button" class="btn sm ghost" onClick={() => send({ type: "testWebhook" })}>
+                {t("Send a test")}
+              </button>
+              <button type="button" class="btn sm quiet danger" onClick={() => confirm(t("Remove this webhook?")) && send({ type: "removeWebhook" })}>
+                {t("Remove")}
+              </button>
+            </>
+          )}
+        </div>
+      </form>
+      {api.webhook && (
+        <>
+          <p class="muted tiny">{t("Each delivery is signed with this secret, so your server can check it came from here:")}</p>
+          <div class="mod-link">
+            <input class="input mono" readOnly value={api.webhook.secret} aria-label={t("Webhook secret")} onFocus={(e) => e.currentTarget.select()} />
+            <button class="btn sm" onClick={() => copy(api.webhook!.secret, t("Secret copied"))}>
+              {t("Copy")}
+            </button>
+          </div>
+          {last ? (
+            <p class={`notice small ${last.ok ? "" : "bad"}`}>
+              {last.ok ? t("Last delivery worked ({status}) at {time}.", { status: last.status, time: whenText(last.at) }) : t("Last delivery failed at {time}: {error}", { time: whenText(last.at), error: hookError(last) })}
+            </p>
+          ) : (
+            <p class="muted tiny">{t("Nothing sent yet. Use \"Send a test\" to check it works.")}</p>
+          )}
+        </>
+      )}
     </div>
   );
 }

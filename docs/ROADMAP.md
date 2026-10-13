@@ -254,7 +254,7 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 - [x] Presenter remote (`/remote/CODE`, QR code from the host page)
 - [x] Stream overlay mode (`/present/CODE?overlay=1`)
 - [x] Embed script for any website (`/embed.js`)
-- [ ] Public API + webhooks
+- [x] Public API + webhooks (read-only key per event, signed and grouped webhook deliveries; see docs/API.md)
 - [ ] PowerPoint web add-in
 - [x] Translations: English, French, Spanish (auto from the phone's language, menu to switch, `?lang=` for big screens)
 - [x] Team quiz mode (balanced auto-pick, ranked by average points, shown on the big screen, overlay, recap and Excel)

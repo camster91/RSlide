@@ -133,6 +133,33 @@ export interface Meta {
   recapPublic: boolean;
   /** Only sent to hosts: the summary shown at the top of the recap. */
   recapSummary?: string;
+  /** Only sent to hosts: API key and webhook setup. */
+  api?: ApiSetup;
+}
+
+/** Things a webhook can be told about. */
+export const WEBHOOK_EVENTS = [
+  "question.created",
+  "question.updated",
+  "question.deleted",
+  "reply.created",
+  "poll.launched",
+  "poll.closed",
+  "poll.revealed",
+  "response.created",
+] as const;
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+
+export interface ApiSetup {
+  /** Read-only key for the public API. Null = API off for this event. */
+  key: string | null;
+  webhook: {
+    url: string;
+    /** Used to sign each delivery (HMAC-SHA256), so the receiver can check it came from us. */
+    secret: string;
+    events: WebhookEvent[];
+    last: { at: number; ok: boolean; status: number; error?: string } | null;
+  } | null;
 }
 
 export interface Reply {
@@ -361,6 +388,10 @@ export type ClientMsg =
   | { type: "setPasscode"; passcode: string }
   | { type: "setPresentMode"; mode: PresentMode }
   | { type: "newModKey" }
+  | { type: "setApiKey"; on: boolean }
+  | { type: "setWebhook"; url: string; events: WebhookEvent[] }
+  | { type: "removeWebhook" }
+  | { type: "testWebhook" }
   | { type: "setRecap"; public?: boolean; summary?: string }
   | { type: "clearQuestions" }
   | { type: "savePoll"; poll: PollDraft }

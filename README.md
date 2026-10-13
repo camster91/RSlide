@@ -42,6 +42,7 @@
 - Quiz: set a timer (or none), reveal the answer, show the leaderboard on the big screen
 - Event passcode, and ask people for their name or name + email before they join
 - Six colour themes per event; light or dark big screen
+- **API and webhooks**: a read-only API key per event, and signed webhooks for new questions, poll launches, reveals and more. See [docs/API.md](docs/API.md)
 - Export everything to Excel (questions, results, every answer, leaderboard, participants), CSV, or a printable report you can save as PDF
 
 **Big screen** — `/present/CODE`
@@ -128,7 +129,7 @@ Browser ──HTTP──▶ Worker (src/worker/index.ts) ──▶ web app (Prea
 npm run typecheck
 npm test                     # unit tests
 npm run preview              # start the built app on http://localhost:8787, then in a second terminal:
-npm run test:e2e             # 240+ end-to-end checks with hosts, moderators, attendees and a big screen
+npm run test:e2e             # 300+ end-to-end checks (add WEBHOOK_ALLOW_PRIVATE="1" to .dev.vars to include webhook delivery) with hosts, moderators, attendees and a big screen
 npm run test:load -- 2000    # 2,000 simulated attendees: poll, upvotes and a quiz reveal
 ```
 
@@ -152,7 +153,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for a deeper tour.
 See the full product plan in **[docs/ROADMAP.md](docs/ROADMAP.md)** — Slido Pro feature parity, design direction, architecture and release phases.
 
 Done: Slido Pro-level Q&A, polls, quizzes, moderation, analytics and exports (v0.1–v0.3), plus repeat-question merging, phone remote, stream overlay and website embed (v0.4), and paste-to-polls and recap pages (v0.5).
-Next up: public API and webhooks, host accounts.
+Next up: host accounts.
 
 Contributions welcome — read [CONTRIBUTING.md](CONTRIBUTING.md), pick any unchecked item and open an issue.
 

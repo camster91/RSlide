@@ -2,6 +2,7 @@ import { EventRoom, type Env } from "./room";
 import { clean, newCode, newId, normCode } from "./logic";
 import { LIMITS, type EventTemplate } from "../shared/protocol";
 import { templateById } from "../shared/templates";
+import { apiJson, apiKeyFrom, apiPreflight, apiRaw } from "./api";
 
 export { EventRoom };
 
@@ -14,6 +15,19 @@ export default {
     const parts = url.pathname.split("/").filter(Boolean); // ["api", "events", CODE, action, ...]
 
     if (parts[0] !== "api") return env.ASSETS.fetch(request);
+
+    // Public read-only API: /api/v1/events/CODE[/questions|/polls[/ID]|/leaderboard|/participants]
+    if (parts[1] === "v1") {
+      if (request.method === "OPTIONS") return apiPreflight();
+      if (request.method !== "GET") return apiJson({ error: "The API is read-only. Use GET." }, 405);
+      if (parts[2] !== "events" || !parts[3]) return apiJson({ error: "Not found. See docs/API.md." }, 404);
+      const code = normCode(parts[3]);
+      if (code.length < 4 || code.length > 10) return apiJson({ error: "Bad code" }, 400);
+      const query = Object.fromEntries(url.searchParams);
+      delete query.key;
+      const r = await env.EVENTS.getByName(code).apiRead(apiKeyFrom(request), parts.slice(4), query);
+      return apiRaw(r.json, r.status);
+    }
     if (parts[1] !== "events") return json({ error: "Not found" }, 404);
 
     // POST /api/events → create a new event

@@ -10,6 +10,8 @@ import {
   REACTIONS,
   THEMES,
   type Analytics,
+  type ApiSetup,
+  type WebhookEvent,
   type ClientMsg,
   type EventInfo,
   type EventTemplate,
@@ -63,6 +65,7 @@ import {
 import { buildXlsx, type Cell, type Sheet } from "./xlsx";
 import { AI_DUPLICATE_SCORE, aiAvailable, chat, embed, packVector, POLLS_PROMPT, SUMMARY_PROMPT, unpackVector, type AiEnv } from "./ai";
 import { parsePolls, type PasteResult } from "../shared/paste";
+import { checkWebhookUrl, cleanWebhookEvents, newApiKey, newSecret, signWebhook, WEBHOOK_BATCH_MS, WEBHOOK_MAX_BATCH, WEBHOOK_TIMEOUT_MS } from "./api";
 import { DUPLICATE_SCORE, fingerprint, similarity, vectorScore, type Fingerprint } from "../shared/similar";
 
 export interface Env extends AiEnv {
@@ -74,6 +77,8 @@ export interface Env extends AiEnv {
   EVENT_TTL_HOURS?: string;
   /** Max attendees connected at once per event. 0 or empty = unlimited. */
   MAX_PARTICIPANTS?: string;
+  /** "1" lets webhooks go to local addresses. Only for development and tests. */
+  WEBHOOK_ALLOW_PRIVATE?: string;
 }
 
 interface EventRecord {
@@ -93,6 +98,7 @@ interface EventRecord {
   /** Public recap page: shared or not, and the host's summary. */
   recap: { public: boolean; summary: string };
   teams: Label[];
+  api: ApiSetup;
 }
 
 interface Attachment {
@@ -163,6 +169,13 @@ const PROFANITY: Profanity[] = ["off", "mask", "review"];
 /** Extra time allowed after a quiz timer ends, for slow networks. */
 const QUIZ_GRACE_MS = 1500;
 const isStaff = (role: Role) => role === "host" || role === "mod";
+/** Compares secrets in constant time, so timing doesn't leak how much of a key was right. */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
 
 /**
  * One EventRoom per event code. Holds all questions, votes, polls and responses
@@ -188,6 +201,9 @@ export class EventRoom extends DurableObject<Env> {
   /** Activity per minute, waiting to be saved for analytics. */
   private activity = new Map<string, number>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Webhook events waiting to be sent, and the timer that sends them. */
+  private hookQueue: { type: WebhookEvent | "ping"; at: number; data: unknown }[] = [];
+  private hookTimer: ReturnType<typeof setTimeout> | null = null;
   /** Word fingerprints of questions, for duplicate hints. Rebuilt on demand. */
   private prints = new Map<string, Fingerprint>();
   private onlineTimer: ReturnType<typeof setTimeout> | null = null;
@@ -220,6 +236,7 @@ export class EventRoom extends DurableObject<Env> {
         this.ev.stats ??= { peakOnline: 0, peakAt: null };
         this.ev.recap ??= { public: false, summary: "" };
         this.ev.teams ??= [];
+        this.ev.api ??= { key: null, webhook: null };
       }
     });
   }
@@ -305,6 +322,7 @@ export class EventRoom extends DurableObject<Env> {
       stats: { peakOnline: 0, peakAt: null },
       recap: { public: false, summary: "" },
       teams: [],
+      api: { key: null, webhook: null },
     };
     this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('event', ?)", JSON.stringify(ev));
     for (const q of old.questions ?? []) {
@@ -354,6 +372,7 @@ export class EventRoom extends DurableObject<Env> {
       stats: { peakOnline: 0, peakAt: null },
       recap: { public: false, summary: "" },
       teams: [],
+      api: { key: null, webhook: null },
     };
     this.persistEvent();
     await this.scheduleAlarm();
@@ -367,7 +386,7 @@ export class EventRoom extends DurableObject<Env> {
   }
 
   async isHost(key: string): Promise<boolean> {
-    return !!this.ev && !!key && key === this.ev.hostKey;
+    return !!this.ev && !!key && safeEqual(key, this.ev.hostKey);
   }
 
   /** Copies this event's setup (not its answers) so it can be reused. */
@@ -599,6 +618,203 @@ export class EventRoom extends DurableObject<Env> {
     }
   }
 
+  // ---------- public API ----------
+
+  private apiAllowed(key: string): boolean {
+    const ev = this.ev;
+    return !!ev && !!key && ((!!ev.api.key && safeEqual(key, ev.api.key)) || safeEqual(key, ev.hostKey));
+  }
+
+  /** Read-only JSON API. `path` is what comes after /api/v1/events/CODE. */
+  async apiRead(key: string, path: string[], query: Record<string, string>): Promise<{ status: number; json: string }> {
+    const r = this.apiData(key, path, query);
+    return { status: r.status, json: JSON.stringify(r.body) };
+  }
+
+  private apiData(key: string, path: string[], query: Record<string, string>): { status: number; body: unknown } {
+    if (!this.ev) return { status: 404, body: { error: "Event not found" } };
+    if (!key) return { status: 401, body: { error: "Send your API key: Authorization: Bearer <key>" } };
+    if (!this.apiAllowed(key)) return { status: 403, body: { error: "Wrong API key" } };
+    const ev = this.ev;
+    const count = (q: string) => this.sql.exec<{ n: number }>(q).one().n;
+    const [what = "", id] = path;
+    if (what === "" && !id)
+      return {
+        status: 200,
+        body: {
+          code: ev.code,
+          title: ev.title,
+          createdAt: ev.createdAt,
+          online: this.onlineCount(),
+          presentMode: ev.presentMode,
+          activePollId: ev.activePollId,
+          qaOpen: ev.settings.qaOpen,
+          rooms: ev.rooms,
+          labels: ev.labels,
+          teams: ev.teams,
+          counts: {
+            questions: count("SELECT COUNT(*) AS n FROM questions"),
+            polls: count("SELECT COUNT(*) AS n FROM polls"),
+            participants: count("SELECT COUNT(*) AS n FROM seen"),
+            responses: count("SELECT COUNT(*) AS n FROM responses"),
+          },
+        },
+      };
+    if (what === "questions" && !id) {
+      const status = query.status && ["pending", "live", "answered", "archived"].includes(query.status) ? query.status : null;
+      const rows = this.sql.exec<QuestionRow>(`SELECT * FROM questions ${status ? "WHERE status = ?" : ""} ORDER BY ts LIMIT 5000`, ...(status ? [status] : [])).toArray();
+      const replies = this.repliesFor(null);
+      const room = query.room;
+      return { status: 200, body: { questions: rows.filter((q) => !room || q.room === room).map((q) => this.toQuestion(q, "host", replies.get(q.id) ?? [])) } };
+    }
+    if (what === "polls") {
+      const polls = this.allPolls();
+      if (!id) return { status: 200, body: { polls: polls.map((p) => ({ ...p, results: this.results(p.id) })) } };
+      const p = polls.find((x) => x.id === id);
+      if (!p) return { status: 404, body: { error: "Poll not found" } };
+      const body: Record<string, unknown> = { poll: p, results: this.results(p.id) };
+      if (query.responses === "1") {
+        const names = this.participantNames();
+        body.responses = this.sql
+          .exec<ResponseRow>("SELECT pid, value, ts, elapsed FROM responses WHERE poll_id = ? ORDER BY ts LIMIT 10000", p.id)
+          .toArray()
+          .map((r) => ({ participant: r.pid, name: names.get(r.pid)?.name ?? "", value: JSON.parse(r.value), at: r.ts }));
+      }
+      return { status: 200, body };
+    }
+    if (what === "leaderboard" && !id) {
+      const lb = this.leaderboard();
+      const names = this.participantNames();
+      return {
+        status: 200,
+        body: {
+          rounds: lb.board.rounds,
+          players: lb.ranked.map((r) => ({ rank: lb.rank.get(r.pid), participant: r.pid, name: names.get(r.pid)?.name ?? "", points: r.points, correct: lb.byPid.get(r.pid)?.correct ?? 0, team: this.teamOf(r.pid) ?? null })),
+          teams: lb.board.teams ?? [],
+        },
+      };
+    }
+    if (what === "participants" && !id) {
+      const rows = this.sql.exec<{ pid: string; name: string; email: string; joined_at: number; team: string | null }>("SELECT * FROM participants ORDER BY joined_at").toArray();
+      return { status: 200, body: { participants: rows.map((r) => ({ id: r.pid, name: r.name, email: r.email, team: r.team, joinedAt: r.joined_at })) } };
+    }
+    return { status: 404, body: { error: "Not found. See docs/API.md for the endpoints." } };
+  }
+
+  // ---------- webhooks ----------
+
+  private hook(type: WebhookEvent, data: unknown) {
+    const w = this.ev?.api.webhook;
+    if (!w || !w.events.includes(type)) return;
+    if (this.hookQueue.length >= WEBHOOK_MAX_BATCH * 20) return; // receiver is far behind: drop rather than eat memory
+    this.hookQueue.push({ type, at: Date.now(), data });
+    this.scheduleWebhooks(WEBHOOK_BATCH_MS);
+  }
+
+  private hookQuestion(type: "question.created" | "question.updated", id: string) {
+    const q = this.sql.exec<QuestionRow>("SELECT * FROM questions WHERE id = ?", id).toArray()[0];
+    if (q) this.hook(type, { question: this.toQuestion(q, "host", this.repliesFor([id]).get(id) ?? []) });
+  }
+
+  private hookPoll(type: "poll.launched" | "poll.closed" | "poll.revealed", id: string) {
+    const p = this.pollRow(id);
+    if (p) this.hook(type, { poll: p, results: this.results(id) });
+  }
+
+  /** Turns a handled message into webhook events. */
+  private webhookFor(msg: ClientMsg, pid: string, activeBefore: string | null) {
+    switch (msg.type) {
+      case "ask": {
+        const q = this.sql.exec<{ id: string }>("SELECT id FROM questions WHERE pid = ? ORDER BY ts DESC LIMIT 1", pid).toArray()[0];
+        if (q) this.hookQuestion("question.created", q.id);
+        return;
+      }
+      case "editQuestion":
+      case "approve":
+      case "answer":
+      case "archive":
+      case "highlight":
+      case "tagQuestion":
+      case "moveQuestion":
+        return this.hookQuestion("question.updated", msg.id);
+      case "withdraw":
+      case "deleteQuestion":
+        return this.hook("question.deleted", { id: msg.id });
+      case "mergeQuestion":
+        this.hook("question.deleted", { id: msg.id, mergedInto: msg.into });
+        return this.hookQuestion("question.updated", msg.into);
+      case "reply": {
+        const r = this.sql.exec<ReplyRow>("SELECT * FROM replies WHERE qid = ? AND pid = ? ORDER BY ts DESC LIMIT 1", msg.id, pid).toArray()[0];
+        if (r) this.hook("reply.created", { questionId: r.qid, reply: { id: r.id, text: r.text, name: r.name, ts: r.ts, official: !!r.official } });
+        return;
+      }
+      case "respond": {
+        const r = this.sql.exec<ResponseRow>("SELECT pid, value, ts, elapsed FROM responses WHERE poll_id = ? AND pid = ?", msg.pollId, pid).toArray()[0];
+        if (r) this.hook("response.created", { pollId: msg.pollId, participant: pid, name: this.participant(pid)?.name ?? "", value: JSON.parse(r.value), at: r.ts });
+        return;
+      }
+      case "activatePoll":
+        if (activeBefore && activeBefore !== msg.pollId) this.hookPoll("poll.closed", activeBefore);
+        if (msg.pollId && this.ev!.activePollId === msg.pollId) this.hookPoll("poll.launched", msg.pollId);
+        return;
+      case "closePoll":
+        return this.hookPoll("poll.closed", msg.pollId);
+      case "revealAnswer":
+        if (this.pollRow(msg.pollId)?.revealed) this.hookPoll("poll.revealed", msg.pollId);
+        return;
+    }
+  }
+
+  private scheduleWebhooks(ms: number) {
+    if (this.hookTimer) {
+      if (ms > 0) return;
+      clearTimeout(this.hookTimer);
+    }
+    this.hookTimer = setTimeout(() => {
+      this.hookTimer = null;
+      void this.deliverWebhooks();
+    }, ms);
+  }
+
+  /** Sends queued events in one signed POST. Retries once after 5 seconds if it fails. */
+  private async deliverWebhooks(retry = false) {
+    const w = this.ev?.api.webhook;
+    if (!w || !this.hookQueue.length) return;
+    const batch = this.hookQueue.splice(0, WEBHOOK_MAX_BATCH);
+    const at = Date.now();
+    const body = JSON.stringify({ event: this.ev!.code, sentAt: at, events: batch });
+    let last: NonNullable<ApiSetup["webhook"]>["last"];
+    try {
+      const r = await fetch(w.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "user-agent": "RSlide-Webhooks/1",
+          "x-rslide-event": this.ev!.code,
+          "x-rslide-timestamp": String(at),
+          "x-rslide-signature": await signWebhook(w.secret, at, body),
+        },
+        body,
+        signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+      });
+      last = { at, ok: r.ok, status: r.status, ...(r.ok ? {} : { error: `The server answered ${r.status}` }) };
+    } catch (e) {
+      last = { at, ok: false, status: 0, error: (e as Error).name === "TimeoutError" ? "No answer within 8 seconds" : "Couldn't reach that address" };
+    }
+    // The host may have removed or changed the webhook while we waited.
+    if (this.ev?.api.webhook?.url !== w.url) return;
+    this.ev.api.webhook.last = last;
+    this.persistEvent();
+    this.dirtyMeta = true;
+    this.scheduleFlush();
+    if (!last.ok && !retry) {
+      this.hookQueue.unshift(...batch);
+      setTimeout(() => void this.deliverWebhooks(true), 5000);
+      return;
+    }
+    if (this.hookQueue.length) this.scheduleWebhooks(WEBHOOK_BATCH_MS);
+  }
+
   async analytics(key: string): Promise<Analytics | null> {
     if (!(await this.isHost(key))) return null;
     this.saveActivity();
@@ -758,10 +974,20 @@ export class EventRoom extends DurableObject<Env> {
     if (!msg || typeof msg !== "object") return;
     const { role, pid } = ws.deserializeAttachment() as Attachment;
     if (role === "present") return;
+    const before = this.ev.api.webhook ? { active: this.ev.activePollId } : null;
     try {
-      if (this.handleAudience(msg, pid, role)) return;
-      if (isStaff(role) && this.handleModeration(msg)) return;
-      if (role === "host") this.handleHost(msg);
+      if (this.handleAudience(msg, pid, role)) {
+        if (before) this.webhookFor(msg, pid, before.active);
+        return;
+      }
+      if (isStaff(role) && this.handleModeration(msg)) {
+        if (before) this.webhookFor(msg, pid, before.active);
+        return;
+      }
+      if (role === "host") {
+        this.handleHost(msg);
+        if (before) this.webhookFor(msg, pid, before.active);
+      }
     } catch (e) {
       if (e instanceof UserError) this.send(ws, { type: "error", message: e.message });
       else throw e;
@@ -1221,6 +1447,22 @@ export class EventRoom extends DurableObject<Env> {
   private handleHost(msg: ClientMsg) {
     const ev = this.ev!;
     switch (msg.type) {
+      case "setApiKey":
+        ev.api.key = msg.on ? newApiKey() : null;
+        return this.saveEvent();
+      case "setWebhook": {
+        const url = checkWebhookUrl(msg.url, this.env.WEBHOOK_ALLOW_PRIVATE === "1");
+        ev.api.webhook = { url, secret: ev.api.webhook?.secret ?? newSecret(), events: cleanWebhookEvents(msg.events), last: ev.api.webhook?.url === url ? ev.api.webhook.last : null };
+        return this.saveEvent();
+      }
+      case "removeWebhook":
+        ev.api.webhook = null;
+        this.hookQueue = [];
+        return this.saveEvent();
+      case "testWebhook":
+        if (!ev.api.webhook) throw new UserError("Add a webhook address first");
+        this.hookQueue.push({ type: "ping", at: Date.now(), data: { message: "Test from RSlide. Your webhook works." } });
+        return this.scheduleWebhooks(0);
       case "setRecap":
         if (typeof msg.public === "boolean") ev.recap.public = msg.public;
         if (typeof msg.summary === "string") ev.recap.summary = msg.summary.replace(/\r\n?/g, "\n").trim().slice(0, LIMITS.summary);
@@ -1628,7 +1870,7 @@ export class EventRoom extends DurableObject<Env> {
       rooms: ev.rooms,
       teams: ev.teams,
       recapPublic: ev.recap.public,
-      ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey, ai: aiAvailable(this.env), recapSummary: ev.recap.summary } : {}),
+      ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey, ai: aiAvailable(this.env), recapSummary: ev.recap.summary, api: ev.api } : {}),
     };
   }
 

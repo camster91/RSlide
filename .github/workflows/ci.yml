@@ -28,6 +28,8 @@ jobs:
         run: npm run build
       - name: Start app
         run: |
+          # Lets the webhook tests deliver to a receiver on this machine. Never set this in production.
+          echo 'WEBHOOK_ALLOW_PRIVATE="1"' > .dev.vars
           npx vite preview --port 8787 --host 127.0.0.1 > preview.log 2>&1 &
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/ > /dev/null && break; sleep 1; done
       - name: End-to-end tests
