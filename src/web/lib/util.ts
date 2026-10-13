@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
-import type { EventInfo, ScreenLook, ThemeName } from "../../shared/protocol";
+import { brandPalette, cleanHex } from "../../shared/color";
+import type { Brand, EventInfo, ScreenLook, ThemeName } from "../../shared/protocol";
 import { lang, plural, t } from "./i18n";
 
 // ---------- branding ----------
@@ -10,6 +11,17 @@ export interface BrandConfig {
   heroTitle: string;
   heroText: string;
   titlePlaceholder: string;
+  /** Who runs this site, and how to reach them (shown on the privacy, terms and help pages). */
+  operator: string;
+  contactEmail: string;
+  /** Extra sentence for the privacy page about how long data is kept on this site. */
+  retention: string;
+  termsDate: string;
+  /** A separate status page with history, if you have one. */
+  statusUrl: string;
+  /** Site-wide brand colours (#rrggbb). Events can still pick their own. */
+  brandColor: string;
+  accentColor: string;
 }
 declare global {
   interface Window {
@@ -23,6 +35,13 @@ export const CFG: BrandConfig = {
   heroTitle: "Ask. Vote. Be heard.",
   heroText: "",
   titlePlaceholder: "",
+  brandColor: "",
+  accentColor: "",
+  operator: "",
+  contactEmail: "",
+  retention: "",
+  termsDate: "",
+  statusUrl: "",
   ...(typeof window !== "undefined" ? window.RSLIDE_CONFIG : {}),
 };
 
@@ -131,15 +150,25 @@ export async function fetchEvent(code: string): Promise<EventInfo | null> {
 
 // ---------- theme ----------
 /** Applies an event's colour theme and light/dark look to the whole page. */
-export function useTheme(theme: ThemeName | undefined, look: "auto" | ScreenLook = "auto") {
+export function useTheme(theme: ThemeName | undefined, look: "auto" | ScreenLook = "auto", brand?: Brand | null) {
+  const color = cleanHex(brand?.color) ?? cleanHex(CFG.brandColor);
+  const accent = cleanHex(brand?.accent) ?? cleanHex(CFG.accentColor);
+  const font = brand?.font ?? "default";
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.theme = theme ?? "indigo";
     root.dataset.look = look;
+    root.dataset.font = font;
+    const vars = ["--t-brand-l", "--t-brand-d", "--t-accent-l", "--t-accent-d"];
+    if (color || accent) {
+      const p = brandPalette(color ?? "#3b3fd8", accent);
+      const vals = [color ? p.brandLight : null, color ? p.brandDark : null, accent ? p.accentLight : null, accent ? p.accentDark : null];
+      vars.forEach((v, i) => (vals[i] ? root.style.setProperty(v, vals[i]) : root.style.removeProperty(v)));
+    } else vars.forEach((v) => root.style.removeProperty(v));
     const meta = document.querySelector('meta[name="theme-color"]');
-    const brand = getComputedStyle(root).getPropertyValue("--brand").trim();
-    if (meta && brand) meta.setAttribute("content", brand);
-  }, [theme, look]);
+    const c = getComputedStyle(root).getPropertyValue("--brand").trim();
+    if (meta && c) meta.setAttribute("content", c);
+  }, [theme, look, color, accent, font]);
 }
 
 // ---------- passcodes (remembered per event on this device) ----------

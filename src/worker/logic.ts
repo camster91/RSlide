@@ -1,5 +1,10 @@
 // Pure helpers used by the event room. No Cloudflare APIs here, so they're easy to unit test.
+import { cleanHex } from "../shared/color";
 import {
+  BRAND_FONTS,
+  DEFAULT_BRAND,
+  type Brand,
+  type BrandFont,
   ITEM_TYPES,
   LABEL_COLORS,
   LIMITS,
@@ -86,11 +91,9 @@ export function validateItem(d: ItemDraft | PollDraft, allowed: readonly (ItemTy
     const a = Array.isArray(d.axes) ? d.axes : [];
     axes = [clean(a[0], 30) || "Impact", clean(a[1], 30) || "Effort"];
   }
-  let image: string | null = null;
-  if (type === "pin") {
-    if (!isMediaId(d.image)) throw new UserError(`"${title.slice(0, 40)}" needs a picture to pin on`);
-    image = d.image;
-  }
+  // Pin polls need the picture people tap on. Any other question can show a picture too.
+  if (type === "pin" && !isMediaId(d.image)) throw new UserError(`"${title.slice(0, 40)}" needs a picture to pin on`);
+  const image: string | null = isMediaId(d.image) ? d.image : null;
   return {
     type,
     title,
@@ -377,6 +380,50 @@ export function maskWords(text: string, extra: readonly string[] = []): { text: 
 export function cleanBlockedWords(words: unknown): string[] {
   const list = (Array.isArray(words) ? words : String(words ?? "").split(/[\n,]/)).map((w) => clean(w, 30).toLowerCase()).filter(Boolean);
   return [...new Set(list)].slice(0, LIMITS.blockedWords);
+}
+
+// ---------- branding ----------
+
+export function cleanBrand(b: unknown, cur: Brand = DEFAULT_BRAND): Brand {
+  const o = (b && typeof b === "object" ? b : {}) as Record<string, unknown>;
+  return {
+    color: "color" in o ? cleanHex(o.color) : cur.color,
+    accent: "accent" in o ? cleanHex(o.accent) : cur.accent,
+    font: (BRAND_FONTS as readonly unknown[]).includes(o.font) ? (o.font as BrandFont) : cur.font,
+    hideAppName: typeof o.hideAppName === "boolean" ? o.hideAppName : cur.hideAppName,
+  };
+}
+
+// ---------- slides on the big screen ----------
+
+/**
+ * Turns what a host pastes (a share link, an embed link, or a whole <iframe> code) into an embed URL.
+ * Google Slides share links become their /embed form. Only https links are kept.
+ */
+export function cleanDeckUrl(v: unknown): string | null {
+  let s = String(v ?? "").trim();
+  if (!s) return null;
+  const src = s.match(/<iframe[^>]*\ssrc=["']([^"']+)["']/i);
+  if (src) s = src[1].replace(/&amp;/g, "&");
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    throw new UserError("Paste a link that starts with https://");
+  }
+  if (u.protocol !== "https:") throw new UserError("Paste a link that starts with https://");
+  if (s.length > 1500) throw new UserError("That link is too long");
+  const g = u.hostname === "docs.google.com" && u.pathname.match(/^\/presentation\/d\/(e\/)?([\w-]+)/);
+  if (g) {
+    const id = g[2];
+    return g[1] ? `https://docs.google.com/presentation/d/e/${id}/embed?start=false&loop=false` : `https://docs.google.com/presentation/d/${id}/embed?start=false&loop=false&rm=minimal`;
+  }
+  if (/(^|\.)canva\.com$/.test(u.hostname) && u.pathname.startsWith("/design/") && !u.searchParams.has("embed")) {
+    u.pathname = u.pathname.replace(/\/(edit|view)$/, "") + "/view";
+    u.searchParams.set("embed", "");
+    return u.toString().replace("embed=", "embed");
+  }
+  return u.toString();
 }
 
 // ---------- labels and rooms ----------

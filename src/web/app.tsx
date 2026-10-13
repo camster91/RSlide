@@ -23,10 +23,14 @@ const Remote = lazy(() => import("./views/Remote").then((m) => m.Remote));
 const Recap = lazy(() => import("./views/Recap").then((m) => m.Recap));
 const SignIn = lazy(() => import("./views/Account").then((m) => m.SignIn));
 const MyEvents = lazy(() => import("./views/Account").then((m) => m.MyEvents));
+const TeamPage = lazy(() => import("./views/Teams").then((m) => m.TeamPage));
+const JoinTeam = lazy(() => import("./views/Teams").then((m) => m.JoinTeam));
+const Legal = lazy(() => import("./views/Legal").then((m) => m.Legal));
+const Insights = lazy(() => import("./views/Teams").then((m) => m.Insights));
 
 function Router() {
   const path = useLocation();
-  const [, a = "", b = ""] = path.split("/");
+  const [, a = "", b = "", c = "", d = ""] = path.split("/");
   const code = normCode(b);
   if (a === "e" && code) return <Attendee key={code} code={code} />;
   if (a === "host" && code) return <Host key={code} code={code} />;
@@ -38,6 +42,13 @@ function Router() {
   if (a === "recap" && code) return <Recap key={code} code={code} />;
   if (a === "signin") return <SignIn />;
   if (a === "events" && !b) return <MyEvents />;
+  if (a === "insights" && !b) return <Insights />;
+  if (!b && ["privacy", "terms", "security", "accessibility", "status", "help"].includes(a)) return <Legal key={a} page={a as "privacy"} />;
+  if (a === "join-team") return <JoinTeam />;
+  if (a === "teams" && /^[0-9a-f]{16}$/.test(b)) {
+    if (c === "analytics" && normCode(d)) return <Analytics key={d} code={normCode(d)} team={b} />;
+    return <TeamPage key={b} id={b} />;
+  }
   // Short links like yoursite.com/ABC123
   if (a && /^[A-Za-z0-9]{4,8}$/.test(a) && !b) {
     queueMicrotask(() => navigate(`/e/${a.toUpperCase()}`));
@@ -62,7 +73,7 @@ document.addEventListener("click", (e) => {
   const url = new URL(a.href, location.href);
   if (url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   e.preventDefault();
-  history.pushState({}, "", url.pathname + url.hash);
+  history.pushState({}, "", url.pathname + url.search + url.hash);
   window.dispatchEvent(new Event("rs-nav"));
 });
 

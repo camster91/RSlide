@@ -60,6 +60,7 @@ export const Icon = {
   stop: () => svg(<rect x="6" y="6" width="12" height="12" rx="2" />),
   eye: () => svg(<><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>),
   check: () => svg(<path d="m5 12 5 5L20 7" />),
+  download: () => svg(<path d="M12 4v11M7 10l5 5 5-5M5 20h14" />),
 };
 
 // ---------- dialogs ----------
@@ -105,7 +106,8 @@ export function useDialog<T extends HTMLElement>(onClose: () => void) {
 // ---------- chrome ----------
 
 /** The app's brand, or the event's own logo when the host uploaded one. */
-export function Brand({ logo, code }: { logo?: string | null; code?: string }) {
+export function Brand({ logo, code, hide = false }: { logo?: string | null; code?: string; hide?: boolean }) {
+  if (hide && !(logo && code)) return <span class="brand" />;
   if (logo && code)
     return (
       <a class="brand" href="/" aria-label={t("{name} home", { name: CFG.name })}>
@@ -126,10 +128,10 @@ export function Brand({ logo, code }: { logo?: string | null; code?: string }) {
   );
 }
 
-export function TopBar({ title, children, logo, code, host = false }: { title?: string; children?: ComponentChildren; logo?: string | null; code?: string; host?: boolean }) {
+export function TopBar({ title, children, logo, code, host = false, hideApp = false }: { title?: string; children?: ComponentChildren; logo?: string | null; code?: string; host?: boolean; hideApp?: boolean }) {
   return (
     <header class={`bar ${host ? "host" : ""}`}>
-      <Brand logo={logo} code={code} />
+      <Brand logo={logo} code={code} hide={hideApp} />
       {title ? <h1 class="title">{title}</h1> : <div class="title" />}
       <div class="bar-actions">
         {children}
@@ -416,6 +418,12 @@ export function ResultsView({ poll, results, code, big = false, mine }: { poll: 
       )}
     </>
   );
+}
+
+/** The picture a host added to a question (pin questions show theirs as the tap area instead). */
+export function PollPicture({ code, item, size = "card" }: { code: string; item: { type: string; image: string | null; title?: string }; size?: "card" | "stage" | "thumb" }) {
+  if (!item.image || item.type === "pin") return null;
+  return <img class={`poll-pic ${size}`} src={mediaUrl(code, item.image)} alt={t("Picture for this question")} loading="lazy" />;
 }
 
 // ---------- questions ----------

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { MAIN_ROOM, POINTS_BUDGET, REACTIONS, type EventInfo, type Item, type Label, type Leaderboard, type Poll, type Question, type ResponseValue, type Results } from "../../shared/protocol";
+import { MAIN_ROOM, POINTS_BUDGET, REACTIONS, type EventInfo, type Me, type Snapshot, type Item, type Label, type Leaderboard, type Poll, type Question, type ResponseValue, type Results } from "../../shared/protocol";
 import { activePoll, resultsOf, secondsLeft, sortQuestions } from "../../shared/store";
 import { findSimilar } from "../../shared/similar";
 import { useRoom, type Send } from "../lib/room";
 import { t, tj, lang } from "../lib/i18n";
 import { CFG, fetchEvent, mediaUrl, passcodeFor, plural, savePasscode, store, toast, useTheme, useTitle } from "../lib/util";
-import { Board, LabelChip, OfflineBanner, TeamBoard, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, PinMap, Podium, QuestionLabels, Replies, whenText, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
+import { PollPicture, Board, LabelChip, OfflineBanner, TeamBoard, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, PinMap, Podium, QuestionLabels, Replies, whenText, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
 
 type Tab = "qa" | "polls" | "board";
 
@@ -17,7 +17,7 @@ export function Attendee({ code }: { code: string }) {
   useEffect(() => {
     fetchEvent(code).then(setInfo);
   }, [code]);
-  useTheme(info?.theme);
+  useTheme(info?.theme, "auto", info?.brand);
 
   if (info === undefined) return <TopBar />;
   if (info === null) return <ConnProblem status="not-found" code={code} />;
@@ -111,7 +111,7 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
   const [tab, setTab] = useState<Tab>("qa");
   const s = state.snapshot;
   const me = state.me;
-  useTheme(s?.meta.settings.theme);
+  useTheme(s?.meta.settings.theme, "auto", s?.meta.settings.brand);
   useTitle(s ? `${s.meta.title} · ${CFG.name}` : CFG.name);
 
   // Jump to the poll when the host launches one.
@@ -142,7 +142,7 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
 
   return (
     <>
-      <TopBar title={s.meta.title} logo={s.meta.settings.logo} code={code}>
+      <TopBar title={s.meta.title} logo={s.meta.settings.logo} code={code} hideApp={s.meta.settings.brand?.hideAppName}>
         <span class="chip code">{code}</span>
         <ConnDot status={status} />
       </TopBar>
@@ -155,7 +155,14 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
           </a>
         )}
         {current === "polls" && s.meta.teams.length > 0 && !me.team && poll?.type !== "quiz" && <TeamPicker teams={s.meta.teams} board={s.leaderboard} send={send} quizLive={false} />}
-        {current === "polls" && (poll ? (<PollAnswer key={poll.id} code={code} poll={poll} results={resultsOf(s, poll.id)} me={me} clockOffset={state.clockOffset} send={send} />) : <NoPoll />)}
+        {current === "polls" &&
+          (s.meta.settings.selfPaced ? (
+            <SelfPaced s={s} me={me} code={code} clockOffset={state.clockOffset} send={send} />
+          ) : poll ? (
+            <PollAnswer key={poll.id} code={code} poll={poll} results={resultsOf(s, poll.id)} me={me} clockOffset={state.clockOffset} send={send} />
+          ) : (
+            <NoPoll />
+          ))}
         {current === "polls" && s.meta.teams.length > 0 && !me.team && poll?.type === "quiz" && <TeamPicker teams={s.meta.teams} board={s.leaderboard} send={send} quizLive />}
         {current === "polls" && me.team && <MyTeam team={s.meta.teams.find((x) => x.id === me.team)} />}
         {current === "board" && <BoardTab s={s} me={me} />}
@@ -169,7 +176,7 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
         <button aria-current={current === "polls" ? "page" : undefined} onClick={() => setTab("polls")}>
           <Icon.chart />
           {t("Polls")}
-          {poll && current !== "polls" && <span class="pip" role="img" aria-label={t("A poll is live")} />}
+          {(poll || (s.meta.settings.selfPaced && s.polls.some((p) => p.status === "active" && !(p.id in me.responses)))) && current !== "polls" && <span class="pip" role="img" aria-label={t("A poll is live")} />}
         </button>
         {showBoard && (
           <button aria-current={current === "board" ? "page" : undefined} onClick={() => setTab("board")}>
@@ -212,6 +219,59 @@ function MyTeam({ team }: { team?: Label }) {
     <p class="muted small my-team" style={{ textAlign: "center" }}>
       {tj("You're on {team}", { team: <LabelChip label={team} /> })}
     </p>
+  );
+}
+
+/** Self-paced events: every open poll in a list. People answer in any order, in their own time. */
+function SelfPaced({ s, me, code, clockOffset, send }: { s: Snapshot; me: Me; code: string; clockOffset: number; send: Send }) {
+  const open = s.polls.filter((p) => p.status === "active").sort((a, b) => a.ord - b.ord);
+  const done = open.filter((p) => p.id in me.responses).length;
+  const firstTodo = open.find((p) => !(p.id in me.responses))?.id ?? open[0]?.id ?? null;
+  const [pick, setPick] = useState<string | null>(null);
+  const id = pick && open.some((p) => p.id === pick) ? pick : firstTodo;
+  const idx = open.findIndex((p) => p.id === id);
+  const poll = idx >= 0 ? open[idx] : null;
+  if (!open.length) return <NoPoll />;
+  const go = (i: number) => {
+    setPick(open[i].id);
+    scrollTo({ top: 0, behavior: "smooth" });
+  };
+  // Quizzes show the person their own result as soon as they answer.
+  const shown = poll && poll.type === "quiz" && me.checked?.[poll.id] ? { ...poll, revealed: true, correct: me.checked[poll.id], timeLimit: 0 } : poll && poll.type === "quiz" ? { ...poll, timeLimit: 0 } : poll;
+  return (
+    <>
+      <div class="self-head">
+        <div class="spread">
+          <b>{t("Your progress")}</b>
+          <span class="muted small num">{t("{done} of {total} done", { done, total: open.length })}</span>
+        </div>
+        <div class="self-bar" role="progressbar" aria-valuemin={0} aria-valuemax={open.length} aria-valuenow={done} aria-label={t("Your progress")}>
+          <i style={{ width: `${(done / open.length) * 100}%` }} />
+        </div>
+        <ol class="self-steps">
+          {open.map((p, i) => (
+            <li key={p.id}>
+              <button class={`${p.id === id ? "on" : ""} ${p.id in me.responses ? "done" : ""}`} aria-current={p.id === id ? "step" : undefined} aria-label={`${i + 1}. ${p.title}${p.id in me.responses ? ` (${t("done")})` : ""}`} title={p.title} onClick={() => go(i)}>
+                {p.id in me.responses ? "✓" : i + 1}
+              </button>
+            </li>
+          ))}
+        </ol>
+      </div>
+      {shown && <PollAnswer key={shown.id} code={code} poll={shown} results={resultsOf(s, shown.id)} me={me} clockOffset={clockOffset} send={send} />}
+      <div class="spread self-nav">
+        <button class="btn ghost" disabled={idx <= 0} onClick={() => go(idx - 1)}>
+          <Icon.prev /> {t("Back")}
+        </button>
+        {done === open.length ? (
+          <span class="saved-note small">✓ {t("All done. Thanks!")}</span>
+        ) : (
+          <button class="btn accent" disabled={idx >= open.length - 1} onClick={() => go(idx + 1)}>
+            {t("Next")} <Icon.next />
+          </button>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -834,6 +894,7 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
         <span class="muted small">{TYPE_LABEL[poll.type]}</span>
       </div>
       <h2>{poll.title}</h2>
+      <PollPicture code={code} item={poll} />
       {oneTap && !answered && <p class="muted small hint">{t("Tap an answer to vote. You can change it.")}</p>}
       {!pinDone && (
         <ItemInput
@@ -899,6 +960,7 @@ function QuizAnswer({ code, poll, results, mine, me, clockOffset, send }: { code
         {!poll.revealed && <Countdown poll={poll} clockOffset={clockOffset} />}
       </div>
       <h2>{poll.title}</h2>
+      <PollPicture code={code} item={poll} />
       {poll.revealed ? (
         <div class="stack">
           <Confetti fire={right ? poll.id : null} />
@@ -916,7 +978,7 @@ function QuizAnswer({ code, poll, results, mine, me, clockOffset, send }: { code
           {mine && !right && poll.correct && (
             <p class="muted small">{t("The right answer: {answer}", { answer: poll.correct.map((c) => poll.options[c]).join(", ") })}</p>
           )}
-          <ResultsView poll={poll} results={results} code={code} mine={mine ?? undefined} />
+          {!results.hidden && <ResultsView poll={poll} results={results} code={code} mine={mine ?? undefined} />}
         </div>
       ) : (
         <>
@@ -927,7 +989,7 @@ function QuizAnswer({ code, poll, results, mine, me, clockOffset, send }: { code
             </button>
           )}
           <p class="muted" style={{ marginTop: 14, textAlign: "center" }}>
-            {answered ? t("Answer locked in. Wait for the reveal…") : timeUp ? t("Time's up! Wait for the reveal…") : t("Faster correct answers score more points.")}
+            {answered ? t("Answer locked in. Wait for the reveal…") : timeUp ? t("Time's up! Wait for the reveal…") : poll.timeLimit ? t("Faster correct answers score more points.") : t("Pick your answer. You can't change it after.")}
           </p>
           {/* Asked after answering, so it never uses up quiz time. */}
           {!me.name && answered && <Nickname send={send} />}
@@ -1002,6 +1064,7 @@ function SurveyAnswer({ code, poll, results, mine, send }: { code: string; poll:
         {poll.title}
       </p>
       <h2 style={{ marginTop: 4 }}>{item.title}</h2>
+      <PollPicture code={code} item={item} />
       <ItemInput key={step} item={item} code={code} value={answers[step]} onChange={(v) => setAnswers(answers.map((a, i) => (i === step ? v : a)))} />
       <div class="spread" style={{ marginTop: 18 }}>
         <button class="btn ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>

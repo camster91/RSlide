@@ -21,6 +21,7 @@ import {
   type WebhookEvent,
   WEBHOOK_EVENTS,
   type ThemeName,
+  DEFAULT_BRAND,
 } from "../../shared/protocol";
 import { resultsOf, sortQuestions } from "../../shared/store";
 import { TEMPLATES } from "../../shared/templates";
@@ -29,7 +30,8 @@ import { saveToAccount, useAccount } from "../lib/account";
 import { useRoom, type Send } from "../lib/room";
 import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, store, toast, uploadImage, useTheme, useTitle } from "../lib/util";
 import { lang, t, tj } from "../lib/i18n";
-import { Board, ConnProblem, OfflineBanner, useDialog, Countdown, Empty, Icon, LabelChip, Podium, QrCode, TeamBoard, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
+import { BrandEditor } from "../components/brand";
+import { PollPicture, Board, ConnProblem, OfflineBanner, useDialog, Countdown, Empty, Icon, LabelChip, Podium, QrCode, TeamBoard, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
 
 type QTab = "live" | "pending" | "answered" | "archived";
 const Q_TABS: [QTab, string][] = [
@@ -79,7 +81,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const s = state.snapshot;
   useTitle(s ? (moderator ? t("Moderate: {title}", { title: s.meta.title }) : t("Host: {title}", { title: s.meta.title })) : CFG.name);
-  useTheme(s?.meta.settings.theme);
+  useTheme(s?.meta.settings.theme, "auto", s?.meta.settings.brand);
   useEffect(() => {
     if (s && !moderator) {
       rememberHosted({ code, key, title: s.meta.title, ts: Date.now() });
@@ -101,6 +103,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   const list = sortQuestions(by[tab], "popular");
   const byId = new Map((s?.questions ?? []).map((q) => [q.id, q]));
   const livePoll = s?.polls.find((p) => p.status === "active");
+  const selfPaced = !!s?.meta.settings.selfPaced;
   const act = (type: ModAction, id: string) => {
     if (type === "deleteQuestion" && !confirm(t("Delete this question for everyone?"))) return;
     send({ type, id });
@@ -258,7 +261,8 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
                   {t("New poll")}
                 </button>
               </div>
-              {livePoll && (
+              <PaceSwitch selfPaced={selfPaced} polls={s?.polls ?? []} send={send} />
+              {livePoll && !selfPaced && (
                 <div class="live-strip" role="status">
                   <span class="tag live">{t("Live now")}</span>
                   <a class="grow" href={`#poll-${livePoll.id}`}>
@@ -297,6 +301,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
                       send={send}
                       onEdit={() => setEditing(toDraft(p))}
                       liveTitle={livePoll && livePoll.id !== p.id ? livePoll.title : undefined}
+                      selfPaced={selfPaced}
                     />
                   ))}
                 </div>
@@ -758,6 +763,88 @@ function SettingToggle({ k, label, hint, settings, set }: { k: ToggleKey; label:
   );
 }
 
+/** Show the host's own slides on the big screen, with live polls and questions on top. */
+function DeckLink({ code, hostKey, deckUrl, set }: { code: string; hostKey: string; deckUrl: string | null; set: (p: Partial<Settings>) => void }) {
+  const [v, setV] = useState(deckUrl ?? "");
+  useEffect(() => setV(deckUrl ?? ""), [deckUrl]);
+  return (
+    <div class="stack-sm deck-link">
+      <label class="label" for="deck">
+        {t("Present your slides with live polls on top")}
+      </label>
+      <p class="muted tiny">{t("Paste a Google Slides link (shared so anyone with the link can view), or the embed link from PowerPoint for the web or Canva. The big screen shows your slides, and polls and questions appear over them.")}</p>
+      <div class="row" style={{ flexWrap: "nowrap" }}>
+        <input id="deck" class="input" placeholder="https://docs.google.com/presentation/d/…" value={v} onInput={(e) => setV(e.currentTarget.value)} onKeyDown={(e) => e.key === "Enter" && set({ deckUrl: v.trim() || null })} />
+        <button class="btn sm" onClick={() => set({ deckUrl: v.trim() || null })}>
+          {t("Save")}
+        </button>
+      </div>
+      {deckUrl && (
+        <div class="row">
+          <a class="btn sm ghost" href={`/present/${code}#${hostKey}`} target="_blank" rel="noopener">
+            {t("Open big screen with slides")}
+          </a>
+          <button class="btn sm quiet" onClick={() => set({ deckUrl: null })}>
+            {t("Remove slides")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Ways to use the event inside PowerPoint, Google Slides, Keynote and Teams. */
+function SlidesAndApps({ code, title }: { code: string; title: string }) {
+  const [busy, setBusy] = useState(false);
+  const slide = async () => {
+    setBusy(true);
+    try {
+      const { downloadJoinSlide } = await import("../lib/joinSlide");
+      await downloadJoinSlide({ url: joinUrl(code), host: location.host, code, title });
+    } catch (e) {
+      toast((e as Error).message);
+    }
+    setBusy(false);
+  };
+  return (
+    <div class="stack-sm apps-list">
+      <div class="app-row">
+        <div>
+          <b>{t("Join slide")}</b>
+          <p class="muted tiny">{t("A picture with your code and QR. Drop it into PowerPoint, Google Slides, Keynote or Canva.")}</p>
+        </div>
+        <button class="btn sm ghost" disabled={busy} onClick={slide}>
+          {busy ? t("Making…") : t("Download PNG")}
+        </button>
+      </div>
+      <div class="app-row">
+        <div>
+          <b>{t("PowerPoint add-in")}</b>
+          <p class="muted tiny">{t("Live results, Q&A or the join code on a slide. It can start a poll when its slide comes up.")}</p>
+        </div>
+        <a class="btn sm ghost" href="/api/apps/powerpoint.xml" download>
+          {t("Get add-in")}
+        </a>
+      </div>
+      <div class="app-row">
+        <div>
+          <b>{t("Microsoft Teams app")}</b>
+          <p class="muted tiny">{t("A tab and meeting side panel where people ask and vote, and results on the meeting stage.")}</p>
+        </div>
+        <a class="btn sm ghost" href="/api/apps/teams.zip" download>
+          {t("Get app")}
+        </a>
+      </div>
+      <p class="muted tiny">
+        {t("Google Slides and Keynote: add the join slide, then run polls from your phone with the remote. Each poll's More menu also has a big-screen link just for that poll.")}{" "}
+        <a href="https://github.com/camster91/RSlide/blob/main/docs/INTEGRATIONS.md" target="_blank" rel="noopener">
+          {t("Setup guide")}
+        </a>
+      </p>
+    </div>
+  );
+}
+
 /** `datetime-local` works in local time, without seconds. */
 const toLocalInput = (ts: number | null) => {
   if (!ts) return "";
@@ -826,6 +913,9 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
             </button>
             <button type="button" onClick={() => jump("s-moderators")}>
               {t("Moderators")}
+            </button>
+            <button type="button" onClick={() => jump("s-slides")}>
+              {t("Slides and apps")}
             </button>
             <button type="button" onClick={() => jump("s-stream-and-embed")}>
               {t("Stream and embed")}
@@ -929,6 +1019,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
         <LabelsEditor teams labels={meta.teams} onSave={(teams) => sendS({ type: "setTeams", teams })} />
 
         <h3 id="s-audience">{t("Audience")}</h3>
+        {!!meta.capacity && <p class="muted tiny">{t("This event allows up to {n} people at once.", { n: meta.capacity.toLocaleString(lang) })}</p>}
         {Toggle({ k: "reactions", label: t("Emoji reactions"), hint: t("People can send 👏 ❤️ 🔥 to the big screen.") })}
         <p class="label">{t("Ask people for")}</p>
         <div class="seg" role="group" aria-label={t("What attendees must enter")}>
@@ -974,6 +1065,10 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
         <button class="btn sm quiet danger" style={{ marginTop: 8 }} onClick={() => confirm(t("Make a new moderator link? The old link stops working and anyone using it is signed out.")) && sendS({ type: "newModKey" })}>
           {t("Make a new link")}
         </button>
+
+        <h3 id="s-slides">{t("Slides and apps")}</h3>
+        <SlidesAndApps code={code} title={meta.title} />
+        <DeckLink code={code} hostKey={hostKey} deckUrl={settings.deckUrl ?? null} set={set} />
 
         <h3 id="s-stream-and-embed">{t("Stream and embed")}</h3>
         <p class="label" style={{ marginTop: 0 }}>{t("Stream overlay")}</p>
@@ -1035,6 +1130,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
             </button>
           ))}
         </div>
+        <BrandEditor brand={settings.brand ?? DEFAULT_BRAND} onChange={(b) => set({ brand: { ...(settings.brand ?? DEFAULT_BRAND), ...b } })} />
         <p class="label">{t("Big screen")}</p>
         <div class="seg" role="group" aria-label={t("Big screen light or dark")}>
           {(["light", "dark"] as const).map((v) => (
@@ -1443,9 +1539,11 @@ function HostQuestion({ q, act, send, labels, rooms, original }: {
   );
 }
 
-function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEdit, liveTitle }: {
+function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEdit, liveTitle, selfPaced = false }: {
   /** Title of the poll that's live now, if it isn't this one. */
   liveTitle?: string;
+  /** Self-paced: several polls can be open at once. */
+  selfPaced?: boolean;
   code: string;
   poll: Poll;
   results: ReturnType<typeof resultsOf>;
@@ -1456,7 +1554,7 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
   onEdit: () => void;
 }) {
   const confirmThen = (msg: string, m: ClientMsg) => confirm(msg) && send(m);
-  const statusText = p.status === "active" ? t("Live now") : p.status === "closed" ? t("Closed") : t("Not started");
+  const statusText = p.status === "active" ? (selfPaced ? t("Open||status") : t("Live now")) : p.status === "closed" ? t("Closed") : t("Not started");
   return (
     <div id={`poll-${p.id}`} class={`poll-item ${p.status === "active" ? "active" : ""}`}>
       <div class="spread">
@@ -1479,6 +1577,7 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
         </span>
       </div>
       <h3>{p.title}</h3>
+      <PollPicture code={code} item={p} size="thumb" />
       {p.status !== "draft" ? (
         <ResultsView poll={p} results={results} code={code} />
       ) : (
@@ -1488,6 +1587,10 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
         {p.status === "active" ? (
           <button class="btn sm" onClick={() => send({ type: "closePoll", pollId: p.id })}>
             {t("Close poll")}
+          </button>
+        ) : selfPaced ? (
+          <button class="btn sm accent" onClick={() => send({ type: "activatePoll", pollId: p.id })}>
+            {p.status === "closed" ? t("Reopen") : t("Open to attendees")}
           </button>
         ) : (
           <button
@@ -1517,12 +1620,55 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
         </button>
         <More>
           <button onClick={() => send({ type: "duplicatePoll", pollId: p.id })}>{t("Duplicate")}</button>
+          <button
+            onClick={() =>
+              navigator.clipboard
+                .writeText(`${location.origin}/present/${code}?poll=${p.id}#${decodeURIComponent(location.hash.slice(1))}`)
+                .then(() => toast(t("Big-screen link for this poll copied. Keep it private.")))
+                .catch(() => {})
+            }
+          >
+            {t("Copy big-screen link")}
+          </button>
           {results.total > 0 && <button onClick={() => confirmThen(t("Clear every answer to this poll?"), { type: "resetPoll", pollId: p.id })}>{t("Clear answers")}</button>}
           <button class="danger" onClick={() => confirmThen(t("Delete this poll and its answers?"), { type: "deletePoll", pollId: p.id })}>
             {t("Delete")}
           </button>
         </More>
       </div>
+    </div>
+  );
+}
+
+/** Live (one poll at a time, you lead) or self-paced (people go through the open polls on their own). */
+function PaceSwitch({ selfPaced, polls, send }: { selfPaced: boolean; polls: Poll[]; send: Send }) {
+  const notOpen = polls.filter((p) => p.status !== "active");
+  const openCount = polls.length - notOpen.length;
+  const setPace = (on: boolean) => {
+    if (on === selfPaced) return;
+    if (!on && openCount > 1 && !confirm(t("Going back to live closes all {n} open polls. Continue?", { n: openCount }))) return;
+    send({ type: "setSettings", settings: { selfPaced: on } });
+  };
+  return (
+    <div class="pace">
+      <div class="seg" role="group" aria-label={t("How people answer polls")}>
+        <button aria-pressed={!selfPaced} onClick={() => setPace(false)}>
+          {t("Live")}
+        </button>
+        <button aria-pressed={selfPaced} onClick={() => setPace(true)}>
+          {t("Self-paced")}
+        </button>
+      </div>
+      <p class="muted tiny">
+        {selfPaced
+          ? t("People answer every open poll in their own time, like a survey. Quizzes show each person their result right away.")
+          : t("You launch one poll at a time and everyone answers together.")}
+      </p>
+      {selfPaced && notOpen.length > 0 && (
+        <button class="btn sm ghost" onClick={() => notOpen.forEach((p) => send({ type: "activatePoll", pollId: p.id }))}>
+          {t("Open all {n} polls", { n: notOpen.length })}
+        </button>
+      )}
     </div>
   );
 }
@@ -1749,6 +1895,7 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
       {d.type === "scale" && <RangeEditor range={d.range} onChange={(range) => set({ range })} />}
       {d.type === "grid" && <AxesEditor axes={d.axes ?? DEFAULT_AXES} onChange={(axes) => set({ axes })} />}
       {d.type === "pin" && <ImagePicker code={code} hostKey={hostKey} image={d.image ?? null} onChange={(image) => set({ image })} />}
+      {d.type !== "pin" && d.type !== "survey" && <ImagePicker optional code={code} hostKey={hostKey} image={d.image ?? null} onChange={(image) => set({ image })} />}
       {d.type === "points" && <p class="muted small">{t("Each person shares out 100 points across the options.")}</p>}
       {d.type === "rating" && <p class="muted small">{t("People rate from 1 to 5 stars.")}</p>}
       {d.type === "ranking" && <p class="muted small">{t("People put the options in order. The big screen shows the overall order.")}</p>}
@@ -1788,7 +1935,7 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
               )}
               {it.type === "scale" && <RangeEditor range={it.range ?? null} onChange={(range) => setItem(i, { range })} />}
               {it.type === "grid" && <AxesEditor axes={it.axes ?? DEFAULT_AXES} onChange={(axes) => setItem(i, { axes })} />}
-              {it.type === "pin" && <ImagePicker code={code} hostKey={hostKey} image={it.image ?? null} onChange={(image) => setItem(i, { image })} />}
+              <ImagePicker optional={it.type !== "pin"} code={code} hostKey={hostKey} image={it.image ?? null} onChange={(image) => setItem(i, { image })} />
             </div>
           ))}
           {items.length < 15 && (
@@ -1826,12 +1973,12 @@ function AxesEditor({ axes, onChange }: { axes: [string, string]; onChange: (a: 
   );
 }
 
-function ImagePicker({ code, hostKey, image, onChange }: { code: string; hostKey: string; image: string | null; onChange: (id: string | null) => void }) {
+function ImagePicker({ code, hostKey, image, onChange, optional = false }: { code: string; hostKey: string; image: string | null; onChange: (id: string | null) => void; optional?: boolean }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   return (
     <div class="stack-sm">
-      <span class="label">{t("Picture to tap on")}</span>
+      <span class="label">{optional ? t("Picture (optional)") : t("Picture to tap on")}</span>
       {image && (
         <div class="pin-wrap" style={{ maxWidth: 320 }}>
           <img src={mediaUrl(code, image)} alt="" />
@@ -1859,7 +2006,12 @@ function ImagePicker({ code, hostKey, image, onChange }: { code: string; hostKey
         <button type="button" class="btn sm ghost" disabled={busy} onClick={() => ref.current?.click()}>
           {busy ? t("Uploading…") : image ? t("Change picture") : t("Upload a picture")}
         </button>
-        <span class="muted tiny">{t("A map, floor plan, chart or photo works well.")}</span>
+        {optional && image && (
+          <button type="button" class="btn sm quiet" onClick={() => onChange(null)}>
+            {t("Remove")}
+          </button>
+        )}
+        <span class="muted tiny">{optional ? t("Shown with the question, on phones and the big screen.") : t("A map, floor plan, chart or photo works well.")}</span>
       </div>
     </div>
   );

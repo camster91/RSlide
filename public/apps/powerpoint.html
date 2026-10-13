@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live poll on a slide</title>
+    <!-- PowerPoint add-in: shows a poll, Q&A or the join code on a slide, and can start a poll when its slide comes up. -->
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="/config.js"></script>
+    <style>
+      :root { --brand: #3b3fd8; --text: #14163a; --muted: #5e6185; --line: #8a8caa; --bg: #f6f5fb; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--text); }
+      html, body { margin: 0; height: 100%; background: var(--bg); }
+      #slide { position: fixed; inset: 0; border: 0; width: 100%; height: 100%; display: none; background: #fff; }
+      #setup { max-width: 560px; margin: 0 auto; padding: 24px; display: none; }
+      h1 { font-size: 1.3rem; margin: 0 0 6px; }
+      p { margin: 0 0 12px; line-height: 1.45; }
+      .muted { color: var(--muted); font-size: 0.9rem; }
+      label { display: block; font-weight: 600; margin: 14px 0 6px; }
+      input[type="url"], input[type="text"], select { width: 100%; box-sizing: border-box; padding: 10px 12px; font: inherit; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+      .row { display: flex; gap: 8px; }
+      button { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 999px; border: 1px solid var(--brand); background: var(--brand); color: #fff; cursor: pointer; }
+      button.ghost { background: #fff; color: var(--brand); }
+      button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+      .check { display: flex; gap: 8px; align-items: center; font-weight: 400; }
+      .error { color: #b3261e; font-weight: 600; }
+      .warn { background: #fff5d6; border-radius: 10px; padding: 10px 12px; font-size: 0.85rem; }
+      #edit { position: fixed; bottom: 8px; right: 8px; z-index: 2; display: none; padding: 6px 12px; font-size: 0.8rem; opacity: 0.85; }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <iframe id="slide" title="Live content for this slide" allow="clipboard-write"></iframe>
+    <button id="edit" type="button" class="ghost">Change</button>
+
+    <main id="setup">
+      <h1>Live poll on this slide</h1>
+      <p class="muted">Show live results, Q&amp;A or your join code on this slide. It updates while you present.</p>
+      <form id="load">
+        <label for="link">Your host link</label>
+        <div class="row">
+          <input id="link" type="url" required placeholder="https://…/host/ABC123#…" autocomplete="off" />
+          <button type="submit">Load</button>
+        </div>
+        <p class="muted" style="margin-top: 6px">Copy it from your event's host page ("Copy host link").</p>
+        <p id="error" class="error hidden" role="alert"></p>
+      </form>
+
+      <form id="pick" class="hidden">
+        <p><b id="event-title"></b></p>
+        <label for="show">This slide shows</label>
+        <select id="show"></select>
+        <label class="check" id="launch-row"><input id="launch" type="checkbox" checked /> Start this poll when the slide comes up</label>
+        <p class="warn">Anyone with this presentation file can control your event. Before sharing the file, remove this slide, or make a new host link from the event's settings.</p>
+        <div class="row" style="margin-top: 16px">
+          <button type="submit">Show on slide</button>
+          <button type="button" class="ghost" id="back">Back</button>
+        </div>
+      </form>
+    </main>
+
+    <script>
+      (function () {
+        var KEY = "rslide";
+        var $ = function (id) { return document.getElementById(id); };
+        var inOffice = false;
+        var state = null; // { code, key, show: "code"|"qa"|"leaderboard"|"live"|"poll", poll, launch }
+        var cfg = window.RSLIDE_CONFIG || {};
+        if (cfg.name) document.title = cfg.name + " live poll";
+
+        function load() {
+          try {
+            if (inOffice) return Office.context.document.settings.get(KEY) || null;
+            return JSON.parse(localStorage.getItem(KEY) || "null");
+          } catch (e) { return null; }
+        }
+        function save(v, done) {
+          if (inOffice) {
+            Office.context.document.settings.set(KEY, v);
+            Office.context.document.settings.saveAsync(function () { done(); });
+          } else {
+            try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {}
+            done();
+          }
+        }
+
+        function render() {
+          if (!state) {
+            $("slide").style.display = "none";
+            $("edit").style.display = "none";
+            $("setup").style.display = "block";
+            return;
+          }
+          var q = [];
+          if (state.show === "poll" && state.poll) {
+            q.push("poll=" + encodeURIComponent(state.poll));
+            if (state.launch) q.push("launch=1");
+          } else if (state.show !== "live") q.push("show=" + state.show);
+          var src = "/present/" + state.code + (q.length ? "?" + q.join("&") : "") + "#" + encodeURIComponent(state.key);
+          if ($("slide").getAttribute("src") !== src) $("slide").setAttribute("src", src);
+          $("setup").style.display = "none";
+          $("slide").style.display = "block";
+          showEdit();
+        }
+
+        // The "Change" button only shows while editing the deck, never during the slide show.
+        function showEdit() {
+          if (!inOffice) { $("edit").style.display = "block"; return; }
+          Office.context.document.getActiveViewAsync(function (r) {
+            $("edit").style.display = r.status === "succeeded" && r.value === "edit" && state ? "block" : "none";
+          });
+        }
+
+        function parseLink(v) {
+          try {
+            var u = new URL(v.trim());
+            var m = u.pathname.match(/^\/host\/([A-Za-z0-9]{4,10})$/);
+            var key = decodeURIComponent(u.hash.slice(1));
+            if (!m || !key) return null;
+            if (u.origin !== location.origin) return { other: u.origin };
+            return { code: m[1].toUpperCase(), key: key };
+          } catch (e) { return null; }
+        }
+
+        var pending = null;
+        $("load").addEventListener("submit", function (e) {
+          e.preventDefault();
+          var err = $("error");
+          err.classList.add("hidden");
+          var p = parseLink($("link").value);
+          if (!p) { err.textContent = "That doesn't look like a host link. It ends with /host/CODE#…"; err.classList.remove("hidden"); return; }
+          if (p.other) { err.textContent = "This add-in works with events on " + location.host + ". That link is for " + new URL(p.other).host + "."; err.classList.remove("hidden"); return; }
+          fetch("/api/events/" + p.code + "/polls?key=" + encodeURIComponent(p.key))
+            .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+            .then(function (d) {
+              pending = p;
+              $("event-title").textContent = d.title + " (" + p.code + ")";
+              var sel = $("show");
+              sel.innerHTML = "";
+              var opts = [["live", "Whatever is live right now"], ["code", "Join code and QR"], ["qa", "Q&A"], ["leaderboard", "Quiz leaderboard"]];
+              d.polls.forEach(function (x) { opts.push(["poll:" + x.id, "Poll: " + x.title]); });
+              opts.forEach(function (o) { var el = document.createElement("option"); el.value = o[0]; el.textContent = o[1]; sel.appendChild(el); });
+              if (state && state.code === p.code) sel.value = state.show === "poll" ? "poll:" + state.poll : state.show;
+              toggleLaunch();
+              $("load").classList.add("hidden");
+              $("pick").classList.remove("hidden");
+              sel.focus();
+            })
+            .catch(function () { err.textContent = "Couldn't open that event. Check the host link."; err.classList.remove("hidden"); });
+        });
+        function toggleLaunch() { $("launch-row").classList.toggle("hidden", $("show").value.indexOf("poll:") !== 0); }
+        $("show").addEventListener("change", toggleLaunch);
+        $("back").addEventListener("click", function () { $("pick").classList.add("hidden"); $("load").classList.remove("hidden"); });
+        $("pick").addEventListener("submit", function (e) {
+          e.preventDefault();
+          var v = $("show").value;
+          var next = { code: pending.code, key: pending.key, show: v.indexOf("poll:") === 0 ? "poll" : v, poll: v.indexOf("poll:") === 0 ? v.slice(5) : null, launch: $("launch").checked };
+          save(next, function () { state = next; render(); });
+        });
+        $("edit").addEventListener("click", function () {
+          state && ($("link").value = location.origin + "/host/" + state.code + "#" + state.key);
+          $("slide").style.display = "none";
+          $("edit").style.display = "none";
+          $("setup").style.display = "block";
+          $("pick").classList.add("hidden");
+          $("load").classList.remove("hidden");
+        });
+
+        function start() {
+          state = load();
+          render();
+          if (inOffice && Office.context.document.addHandlerAsync)
+            Office.context.document.addHandlerAsync(Office.EventType.ActiveViewChanged, showEdit);
+        }
+        if (window.Office && Office.onReady) Office.onReady(function (info) { inOffice = !!(info && info.host); start(); });
+        else start();
+      })();
+    </script>
+  </body>
+</html>

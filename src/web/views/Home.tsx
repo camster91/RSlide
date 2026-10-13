@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { CFG, fetchEvent, navigate, normCode, rememberHosted, store, toast, useTheme, useTitle, type HostedEvent } from "../lib/util";
-import { Brand, LangPicker } from "../components/ui";
+import { Brand, Icon, LangPicker } from "../components/ui";
+import { useInstall } from "../lib/install";
 import { TEMPLATES } from "../../shared/templates";
 import { t } from "../lib/i18n";
 import { useAccount } from "../lib/account";
@@ -9,12 +10,16 @@ export function Home() {
   useTitle(CFG.name);
   useTheme("indigo");
   const acct = useAccount();
+  const app = useInstall();
   // Signed in: the account's events. Otherwise: events hosted on this device.
   const mine: HostedEvent[] = acct.email ? acct.events.map((e) => ({ code: e.code, key: e.hostKey, title: e.title, ts: e.addedAt })) : store.get<HostedEvent[]>("rs.hosted", []);
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [template, setTemplate] = useState("");
+  const teams = acct.workspaces.filter((w) => w.role !== "viewer");
+  const [team, setTeam] = useState(() => store.get("rs.team", ""));
+  const teamId = teams.some((w) => w.id === team) ? team : "";
 
   const join = async (e: Event) => {
     e.preventDefault();
@@ -28,7 +33,7 @@ export function Home() {
     e.preventDefault();
     setBusy(true);
     try {
-      const r = await fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, ...(template ? { template } : {}) }) });
+      const r = await fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, ...(template ? { template } : {}), ...(teamId ? { workspace: teamId } : {}) }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       rememberHosted({ code: d.code, key: d.hostKey, title: d.title, ts: Date.now() });
@@ -47,6 +52,11 @@ export function Home() {
       <header class="bar" style={{ background: "transparent", borderBottom: 0, position: "static" }}>
         <Brand />
         <span class="grow" />
+        {app.kind === "prompt" && (
+          <button class="btn sm ghost" onClick={app.install}>
+            <Icon.download /> {t("Install app")}
+          </button>
+        )}
         {acct.on &&
           (acct.email ? (
             <a class="btn sm ghost" href="/events">
@@ -79,6 +89,7 @@ export function Home() {
               autoComplete="off"
               autoCapitalize="characters"
               inputMode="text"
+              autoFocus={new URLSearchParams(location.search).has("join")}
               value={code}
               onInput={(e) => setCode(e.currentTarget.value)}
             />
@@ -105,6 +116,30 @@ export function Home() {
               ))}
             </select>
             {template && <p class="muted tiny">{TEMPLATES.find((tpl) => tpl.id === template)?.description}</p>}
+            {teams.length > 0 && (
+              <>
+                <label class="label" for="team">
+                  {t("Save it to")}
+                </label>
+                <select
+                  id="team"
+                  class="input"
+                  value={teamId}
+                  onChange={(e) => {
+                    setTeam(e.currentTarget.value);
+                    store.set("rs.team", e.currentTarget.value);
+                  }}
+                  style={{ marginTop: 0 }}
+                >
+                  <option value="">{t("Just my account")}</option>
+                  {teams.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {t("Workspace: {name}", { name: w.name })}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <button class="btn block" disabled={busy}>
               {busy ? t("Creating…") : t("Create event")}
             </button>
@@ -140,6 +175,15 @@ export function Home() {
           {t("Get the code")}
         </a>
         <LangPicker label />
+        <nav class="home-links" aria-label={t("About this site")}>
+          <a href="/privacy">{t("Privacy")}</a>
+          <a href="/terms">{t("Terms")}</a>
+          <a href="/security">{t("Security")}</a>
+          <a href="/accessibility">{t("Accessibility")}</a>
+          <a href="/status">{t("Status")}</a>
+          <a href="/help">{t("Help")}</a>
+        </nav>
+        {app.kind === "ios" && <p class="tiny muted install-tip">{t("Add it to your home screen: tap Share, then “Add to Home Screen”.")}</p>}
       </footer>
     </div>
   );

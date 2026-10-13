@@ -149,15 +149,16 @@ function HBar({ label, value, pct, note }: { label: string; value: string; pct: 
   );
 }
 
-export function Analytics({ code }: { code: string }) {
-  const key = decodeURIComponent(location.hash.slice(1));
+/** One event's analytics. From a team workspace (`team`), viewers can see it without the host link. */
+export function Analytics({ code, team }: { code: string; team?: string }) {
+  const key = team ? "" : decodeURIComponent(location.hash.slice(1));
   const [data, setData] = useState<Data | null | "forbidden">(null);
   useTitle(data && data !== "forbidden" ? t("Analytics: {title}", { title: data.title }) : CFG.name);
   useTheme(undefined);
   useEffect(() => {
     let stop = false;
     const load = () =>
-      fetch(`/api/events/${code}/analytics?key=${encodeURIComponent(key)}`)
+      fetch(team ? `/api/workspaces/${team}/events/${code}/analytics` : `/api/events/${code}/analytics?key=${encodeURIComponent(key)}`)
         .then((r) => (r.status === 403 || r.status === 404 ? "forbidden" : r.json()))
         .then((d) => !stop && setData(d))
         .catch(() => {});
@@ -169,7 +170,7 @@ export function Analytics({ code }: { code: string }) {
     };
   }, [code, key]);
 
-  if (data === "forbidden" || !key) return <Message title={t("Host link needed")}>{t("Open analytics from the host console of your event.")}</Message>;
+  if (data === "forbidden" || (!key && !team)) return <Message title={t("Host link needed")}>{t("Open analytics from the host console of your event.")}</Message>;
   if (!data) return <div class="report muted">{t("Loading…")}</div>;
   const p = Math.max(1, data.participants);
   const answered = data.polls.reduce((n, x) => n + x.responses, 0);
@@ -178,9 +179,15 @@ export function Analytics({ code }: { code: string }) {
     <main class="report">
       <div class="spread" style={{ marginBottom: 24 }}>
         <Brand />
-        <a class="btn ghost sm" href={`/host/${code}#${key}`}>
-          {t("Back to host console")}
-        </a>
+        {team ? (
+          <a class="btn ghost sm" href={`/teams/${team}`}>
+            {t("Back to workspace")}
+          </a>
+        ) : (
+          <a class="btn ghost sm" href={`/host/${code}#${key}`}>
+            {t("Back to host console")}
+          </a>
+        )}
       </div>
       <p class="muted">{t("Analytics, code {code}. Updates every 30 seconds.", { code })}</p>
       <h1>{data.title}</h1>

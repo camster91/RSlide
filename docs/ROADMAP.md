@@ -255,15 +255,23 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 - [x] Stream overlay mode (`/present/CODE?overlay=1`)
 - [x] Embed script for any website (`/embed.js`)
 - [x] Public API + webhooks (read-only key per event, signed and grouped webhook deliveries; see docs/API.md)
-- [ ] PowerPoint web add-in
+- [x] PowerPoint add-in (live results / Q&A / join code on a slide; starts its poll when the slide comes up)
+- [x] Your own slides (Google Slides, PowerPoint for the web, Canva) with live polls on top; downloadable join slide
+- [x] Team workspaces (owner / editor / viewer, invites, shared events, team look) and insights across events
+- [x] Custom branding per event and per workspace (colours kept readable, headline font, hide app name)
+- [x] Self-paced mode and pictures on any question
+- [x] Installable app (PWA), trust pages (privacy, terms, security, accessibility, status, help), optional Stripe plans
 - [x] Translations: English, French, Spanish (auto from the phone's language, menu to switch, `?lang=` for big screens)
 - [x] Team quiz mode (balanced auto-pick, ranked by average points, shown on the big screen, overlay, recap and Excel)
 
 ### Phase 4 — Enterprise-ready (after v1.0)
-- [ ] SSO (OIDC + SAML) and SCIM user provisioning
+- [x] SSO with OpenID Connect (Microsoft Entra ID, Google Workspace, Okta…)
+- [ ] SAML and SCIM user provisioning
 - [ ] Audit log
 - [ ] LTI 1.3 for Canvas / Moodle / Brightspace
-- [ ] Google Slides add-on, Zoom / Teams apps
+- [x] Microsoft Teams app (tab, meeting side panel, meeting stage)
+- [ ] Native Zoom app (needs Zoom Marketplace review); Google Slides add-on
+- [ ] App-store wrappers (iOS / Android) around the installable app
 - [ ] Self-host outside Cloudflare (Docker image)
 - [ ] Third-party accessibility audit and security review
 - [ ] 5,000+ attendee load test with fan-out

@@ -1,5 +1,6 @@
 // Optional host accounts: who's signed in, and the events saved to their account.
 import { useEffect, useState } from "preact/hooks";
+import type { WorkspaceSummary } from "../../shared/protocol";
 import { store, type HostedEvent } from "./util";
 
 export interface AccountEvent {
@@ -13,8 +14,14 @@ export interface AccountState {
   on: boolean;
   email: string | null;
   events: AccountEvent[];
+  workspaces: WorkspaceSummary[];
+  /** Email sign-in links are available. */
+  emailSignIn: boolean;
+  /** Single sign-on button label (e.g. "Microsoft"), or null when SSO is off. */
+  sso: string | null;
   loading: boolean;
 }
+const OFF: AccountState = { on: false, email: null, events: [], workspaces: [], emailSignIn: false, sso: null, loading: false };
 
 let cache: AccountState | null = null;
 const listeners = new Set<(s: AccountState) => void>();
@@ -28,20 +35,21 @@ export const postJson = (url: string, body: unknown = {}, method = "POST") =>
 
 export async function loadAccount(): Promise<AccountState> {
   try {
-    const cfg = (await (await fetch("/api/auth/config")).json()) as { accounts: boolean };
-    if (!cfg.accounts) return (set({ on: false, email: null, events: [], loading: false }), cache!);
+    const cfg = (await (await fetch("/api/auth/config")).json()) as { accounts: boolean; email?: boolean; sso?: string | null };
+    if (!cfg.accounts) return (set(OFF), cache!);
+    const base = { ...OFF, on: true, emailSignIn: cfg.email !== false, sso: cfg.sso ?? null };
     const r = await fetch("/api/me");
-    if (!r.ok) return (set({ on: true, email: null, events: [], loading: false }), cache!);
-    const me = (await r.json()) as { email: string; events: AccountEvent[] };
-    set({ on: true, email: me.email, events: me.events, loading: false });
+    if (!r.ok) return (set(base), cache!);
+    const me = (await r.json()) as { email: string; events: AccountEvent[]; workspaces?: WorkspaceSummary[] };
+    set({ ...base, email: me.email, events: me.events, workspaces: me.workspaces ?? [] });
   } catch {
-    set({ on: false, email: null, events: [], loading: false });
+    set(OFF);
   }
   return cache!;
 }
 
 export function useAccount(): AccountState & { refresh: () => Promise<AccountState> } {
-  const [s, setS] = useState<AccountState>(cache ?? { on: false, email: null, events: [], loading: true });
+  const [s, setS] = useState<AccountState>(cache ?? { ...OFF, loading: true });
   useEffect(() => {
     listeners.add(setS);
     if (!cache) void loadAccount();

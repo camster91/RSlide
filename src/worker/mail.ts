@@ -41,10 +41,41 @@ export function signInEmail(app: string, link: string, lang: string) {
   return { subject: f(c.subject), text, html };
 }
 
+const INVITE = {
+  en: { subject: "{who} invited you to {team} on {app}", hello: "{who} invited you to join the workspace “{team}” on {app}.", button: "Join the workspace", note: "The invite works for this email address and expires in 7 days." },
+  fr: { subject: "{who} vous invite dans {team} sur {app}", hello: "{who} vous invite à rejoindre l’espace « {team} » sur {app}.", button: "Rejoindre l’espace", note: "L’invitation fonctionne pour cette adresse et expire dans 7 jours." },
+  es: { subject: "{who} te invitó a {team} en {app}", hello: "{who} te invitó a unirte al espacio «{team}» en {app}.", button: "Unirme al espacio", note: "La invitación funciona para este correo y caduca en 7 días." },
+} as const;
+
+export function inviteEmail(app: string, who: string, team: string, link: string, lang: string) {
+  const c = INVITE[(lang in INVITE ? lang : "en") as keyof typeof INVITE];
+  const f = (s: string) => s.replace("{app}", app).replace("{who}", who).replace("{team}", team);
+  return mailBody(f(c.subject), f(c.hello), c.button, c.note, link);
+}
+
+function mailBody(subject: string, hello: string, button: string, note: string, link: string) {
+  const text = `${hello}\n\n${link}\n\n${note}\n`;
+  const html = `<!doctype html><html><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f4f4f8;padding:32px">
+<div style="max-width:480px;margin:0 auto;background:#fff;border-radius:16px;padding:32px">
+<p style="font-size:18px;margin:0 0 24px">${esc(hello)}</p>
+<p style="margin:0 0 24px"><a href="${esc(link)}" style="display:inline-block;background:#3b3fd8;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:999px">${esc(button)}</a></p>
+<p style="color:#666;font-size:14px;margin:0 0 12px">${esc(note)}</p>
+<p style="color:#999;font-size:12px;word-break:break-all;margin:0">${esc(link)}</p>
+</div></body></html>`;
+  return { subject, text, html };
+}
+
 /** Throws if the email couldn't be sent. */
 export async function sendSignIn(env: MailEnv, to: string, link: string, lang: string) {
+  await send(env, to, signInEmail(env.APP_NAME || "RSlide", link, lang));
+}
+
+export async function sendInvite(env: MailEnv, to: string, who: string, team: string, link: string, lang: string) {
+  await send(env, to, inviteEmail(env.APP_NAME || "RSlide", who, team, link, lang));
+}
+
+async function send(env: MailEnv, to: string, { subject, text, html }: { subject: string; text: string; html: string }) {
   const app = env.APP_NAME || "RSlide";
-  const { subject, text, html } = signInEmail(app, link, lang);
   const from = env.EMAIL_FROM!;
   if (env.EMAIL) {
     await env.EMAIL.send({ from: { email: from, name: app }, to, subject, text, html });

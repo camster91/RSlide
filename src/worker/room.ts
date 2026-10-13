@@ -1,9 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
+import type { Workspace } from "./workspace";
+import type { SsoEnv } from "./sso";
+import { capacity, type BillingEnv, type Plan } from "./billing";
 import type { HostAccount } from "./accounts";
 import type { MailEnv } from "./mail";
 import {
   CLOSE,
   DEFAULT_SETTINGS,
+  DEFAULT_BRAND,
   LIMITS,
   MAIN_ROOM,
   PING,
@@ -44,6 +48,8 @@ import {
 import {
   clean,
   cleanBlockedWords,
+  cleanBrand,
+  cleanDeckUrl,
   cleanEmail,
   cleanLabels,
   cleanRooms,
@@ -70,10 +76,12 @@ import { parsePolls, type PasteResult } from "../shared/paste";
 import { checkWebhookUrl, cleanWebhookEvents, newApiKey, newSecret, signWebhook, WEBHOOK_BATCH_MS, WEBHOOK_MAX_BATCH, WEBHOOK_TIMEOUT_MS } from "./api";
 import { DUPLICATE_SCORE, fingerprint, similarity, vectorScore, type Fingerprint } from "../shared/similar";
 
-export interface Env extends AiEnv, MailEnv {
+export interface Env extends AiEnv, MailEnv, SsoEnv, BillingEnv {
   EVENTS: DurableObjectNamespace<EventRoom>;
-  /** Optional host accounts (sign in by email link). */
+  /** Optional host accounts (sign in by email link or single sign-on). */
   ACCOUNTS?: DurableObjectNamespace<HostAccount>;
+  /** Optional team workspaces (needs accounts). */
+  WORKSPACES?: DurableObjectNamespace<Workspace>;
   ASSETS: Fetcher;
   /** Optional R2 bucket for images in polls. */
   MEDIA?: R2Bucket;
@@ -103,6 +111,8 @@ interface EventRecord {
   recap: { public: boolean; summary: string };
   teams: Label[];
   api: ApiSetup;
+  /** Paid plan (only matters when billing is set up): lifts the attendee limit. */
+  plan?: Plan;
 }
 
 interface Attachment {
@@ -167,7 +177,7 @@ type Activity = "join" | "ask" | "vote" | "answer" | "react" | "reply";
 const FLUSH_MS = 80;
 const ONLINE_MS = 2000;
 const ROLES: Role[] = ["host", "mod", "present", "attendee"];
-const BOOL_SETTINGS = ["qaOpen", "moderation", "allowAnonymous", "allowDownvotes", "reactions", "audienceReplies", "hideNames", "aiAssist"] as const;
+const BOOL_SETTINGS = ["qaOpen", "moderation", "allowAnonymous", "allowDownvotes", "reactions", "audienceReplies", "hideNames", "aiAssist", "selfPaced"] as const;
 const IDENTITIES: Identity[] = ["none", "name", "email"];
 const PROFANITY: Profanity[] = ["off", "mask", "review"];
 /** Extra time allowed after a quiz timer ends, for slow networks. */
@@ -386,11 +396,26 @@ export class EventRoom extends DurableObject<Env> {
   async info(): Promise<EventInfo | null> {
     if (!this.ev) return null;
     const s = this.ev.settings;
-    return { code: this.ev.code, title: this.ev.title, passcode: !!this.ev.passcode, identity: s.identity, theme: s.theme, logo: s.logo };
+    return { code: this.ev.code, title: this.ev.title, passcode: !!this.ev.passcode, identity: s.identity, theme: s.theme, logo: s.logo, brand: s.brand ?? DEFAULT_BRAND };
   }
 
   async isHost(key: string): Promise<boolean> {
     return !!this.ev && !!key && safeEqual(key, this.ev.hostKey);
+  }
+
+  /** Set by the server when the event's workspace changes plan. Not reachable from outside. */
+  async setPlan(plan: Plan) {
+    if (!this.ev || (this.ev.plan ?? "free") === plan) return;
+    this.ev.plan = plan;
+    this.persistEvent();
+    this.dirtyMeta = true;
+    this.scheduleFlush();
+  }
+
+  /** The polls in this event, for picking one in a slide add-in. Host only. */
+  async pollList(key: string): Promise<{ title: string; polls: { id: string; title: string; type: string; status: string }[] } | null> {
+    if (!(await this.isHost(key))) return null;
+    return { title: this.ev!.title, polls: this.allPolls().map((p) => ({ id: p.id, title: p.title, type: p.type, status: p.status })) };
   }
 
   /** Copies this event's setup (not its answers) so it can be reused. */
@@ -561,6 +586,7 @@ export class EventRoom extends DurableObject<Env> {
       summary: ev.recap.summary,
       logo: ev.settings.logo,
       theme: ev.settings.theme,
+      brand: ev.settings.brand ?? DEFAULT_BRAND,
       stats: {
         participants: count("SELECT COUNT(*) AS n FROM seen"),
         questions: count("SELECT COUNT(*) AS n FROM questions WHERE status != 'pending'"),
@@ -951,7 +977,7 @@ export class EventRoom extends DurableObject<Env> {
     // The big screen is read-only. Without the key it sees what attendees see.
     if (role === "present" && key !== ev.hostKey) role = "attendee";
     if (role === "attendee" && ev.passcode && normPasscode(url.searchParams.get("pass")) !== ev.passcode) return reject(CLOSE.PASSCODE, "Passcode needed");
-    const max = Number(this.env.MAX_PARTICIPANTS || 0);
+    const max = capacity(this.env, ev.plan ?? "free");
     if (role === "attendee" && max > 0 && this.ctx.getWebSockets("attendee").length >= max) return reject(CLOSE.FULL, "This event is full");
 
     this.ctx.acceptWebSocket(server, [role, `pid:${pid}`]);
@@ -984,7 +1010,9 @@ export class EventRoom extends DurableObject<Env> {
     }
     if (!msg || typeof msg !== "object") return;
     const { role, pid } = ws.deserializeAttachment() as Attachment;
-    if (role === "present") return;
+    // The big screen (opened with the host link) may only launch polls and switch what it shows,
+    // so a slide add-in can start "its" poll when the slide comes up.
+    if (role === "present" && msg.type !== "activatePoll" && msg.type !== "setPresentMode") return;
     const before = this.ev.api.webhook ? { active: this.ev.activePollId } : null;
     try {
       if (this.handleAudience(msg, pid, role)) {
@@ -995,7 +1023,7 @@ export class EventRoom extends DurableObject<Env> {
         if (before) this.webhookFor(msg, pid, before.active);
         return;
       }
-      if (role === "host") {
+      if (role === "host" || role === "present") {
         this.handleHost(msg);
         if (before) this.webhookFor(msg, pid, before.active);
       }
@@ -1216,13 +1244,15 @@ export class EventRoom extends DurableObject<Env> {
         if (!p || p.status !== "active") throw new UserError("This poll is not open");
         const now = Date.now();
         let elapsed: number | null = null;
+        const selfPaced = ev.settings.selfPaced;
         if (p.type === "quiz") {
           if (p.revealed) throw new UserError("Answers are closed — the answer has been revealed");
-          if (p.timeLimit && p.startedAt && now > p.startedAt + p.timeLimit * 1000 + QUIZ_GRACE_MS) throw new UserError("Time's up!");
+          // Self-paced quizzes have no shared clock, so no timer.
+          if (!selfPaced && p.timeLimit && p.startedAt && now > p.startedAt + p.timeLimit * 1000 + QUIZ_GRACE_MS) throw new UserError("Time's up!");
           if (this.sql.exec("SELECT 1 FROM responses WHERE poll_id = ? AND pid = ?", p.id, pid).toArray().length) throw new UserError("You've already answered this one");
           // No team yet: join the smallest one, so nobody loses quiz time picking.
           if (ev.teams.length && !isStaff(role) && !this.teamOf(pid)) this.autoTeam(pid);
-          elapsed = p.startedAt ? Math.max(0, now - p.startedAt) : 0;
+          elapsed = selfPaced ? 0 : p.startedAt ? Math.max(0, now - p.startedAt) : 0;
         }
         const value = this.filterAnswer(p, validateResponse(p, msg.value), role);
         this.sql.exec(
@@ -1232,6 +1262,7 @@ export class EventRoom extends DurableObject<Env> {
         this.track("answer");
         this.touchR(p.id);
         this.touchMe(pid);
+        if (selfPaced && p.type === "quiz") this.invalidateLb();
         return true;
       }
       case "joinTeam": {
@@ -1453,6 +1484,8 @@ export class EventRoom extends DurableObject<Env> {
     if (s.profanity && PROFANITY.includes(s.profanity)) cur.profanity = s.profanity;
     if (s.blockedWords !== undefined) cur.blockedWords = cleanBlockedWords(s.blockedWords);
     if (s.logo !== undefined) cur.logo = isMediaId(s.logo) ? s.logo : null;
+    if (s.brand !== undefined) cur.brand = cleanBrand(s.brand, cur.brand ?? DEFAULT_BRAND);
+    if (s.deckUrl !== undefined) cur.deckUrl = cleanDeckUrl(s.deckUrl);
     const time = (v: unknown) => (v === null ? null : typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : undefined);
     for (const k of ["qaOpensAt", "qaClosesAt", "deleteAt"] as const) {
       if (!(k in s)) continue;
@@ -1499,6 +1532,7 @@ export class EventRoom extends DurableObject<Env> {
         this.applySettings(msg.settings ?? {});
         // Hiding or showing names changes every question.
         if (msg.settings && "hideNames" in msg.settings) this.touchAllQuestions();
+        if (msg.settings && "selfPaced" in msg.settings) this.paceChanged();
         this.saveEvent();
         if (JSON.stringify([ev.settings.qaOpensAt, ev.settings.qaClosesAt, ev.settings.deleteAt]) !== before) this.ctx.waitUntil(this.scheduleAlarm());
         return;
@@ -1591,6 +1625,16 @@ export class EventRoom extends DurableObject<Env> {
         return;
       }
       case "activatePoll": {
+        // Self-paced: opening a poll leaves the others open too.
+        if (ev.settings.selfPaced) {
+          const p = msg.pollId ? this.pollRow(msg.pollId) : null;
+          if (p && p.status !== "active") {
+            this.sql.exec("UPDATE polls SET status = 'active', started_at = ? WHERE id = ?", Date.now(), p.id);
+            this.touchP(p.id);
+            this.touchR(p.id);
+          }
+          return;
+        }
         for (const r of this.sql.exec<{ id: string }>("UPDATE polls SET status = 'closed' WHERE status = 'active' RETURNING id")) {
           this.touchP(r.id);
           this.touchR(r.id);
@@ -1817,7 +1861,9 @@ export class EventRoom extends DurableObject<Env> {
     if (this.lbCache) return this.lbCache;
     const byPid = new Map<string, { points: number; correct: number }>();
     const perPoll = new Map<string, Map<string, number>>();
-    const quizzes = this.allPolls().filter((p) => p.type === "quiz" && p.revealed);
+    // Self-paced quizzes count as soon as people answer (each person sees their own result).
+    const self = !!this.ev?.settings.selfPaced;
+    const quizzes = this.allPolls().filter((p) => p.type === "quiz" && (p.revealed || (self && p.status !== "draft")));
     for (const p of quizzes) {
       const pts = new Map<string, number>();
       for (const r of this.sql.exec<ResponseRow>("SELECT pid, value, ts, elapsed FROM responses WHERE poll_id = ?", p.id)) {
@@ -1876,7 +1922,33 @@ export class EventRoom extends DurableObject<Env> {
       responses,
       quiz,
       team: this.ev?.teams.length ? (this.teamOf(pid) ?? null) : null,
+      ...(this.ev?.settings.selfPaced ? { checked: this.checkedFor(pid, responses) } : {}),
     };
+  }
+
+  /** Self-paced: the right answers to the quizzes this person has answered, so they see how they did. */
+  private checkedFor(pid: string, responses: Record<string, ResponseValue>): Record<string, number[]> {
+    const out: Record<string, number[]> = {};
+    for (const p of this.allPolls()) if (p.type === "quiz" && p.id in responses) out[p.id] = p.correct ?? [];
+    return out;
+  }
+
+  /** Switching between live and self-paced. */
+  private paceChanged() {
+    const ev = this.ev!;
+    if (ev.settings.selfPaced) {
+      // The live poll stays open; there's just no "current" poll any more.
+      ev.activePollId = null;
+    } else {
+      // Back to live: close everything that was open, the host launches one at a time again.
+      for (const r of this.sql.exec<{ id: string }>("UPDATE polls SET status = 'closed' WHERE status = 'active' RETURNING id")) {
+        this.touchP(r.id);
+        this.touchR(r.id);
+      }
+      ev.activePollId = null;
+    }
+    this.invalidateLb();
+    this.dirtyAllMe = true;
   }
 
   private metaView(role: Role): Meta {
@@ -1894,7 +1966,7 @@ export class EventRoom extends DurableObject<Env> {
       rooms: ev.rooms,
       teams: ev.teams,
       recapPublic: ev.recap.public,
-      ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey, ai: aiAvailable(this.env), recapSummary: ev.recap.summary, api: ev.api } : {}),
+      ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey, ai: aiAvailable(this.env), recapSummary: ev.recap.summary, api: ev.api, capacity: capacity(this.env, ev.plan ?? "free"), plan: ev.plan ?? "free" } : {}),
     };
   }
 
@@ -1908,7 +1980,8 @@ export class EventRoom extends DurableObject<Env> {
   }
 
   private pollVisible(p: Poll, role: Role): boolean {
-    return role === "host" || p.status === "active";
+    // The big screen (host link) gets every poll, so a slide can show or start "its" poll.
+    return role === "host" || role === "present" || p.status === "active";
   }
 
   private pollView(p: Poll, role: Role): Poll {

@@ -25,3 +25,7 @@ const loaders: Record<string, () => Promise<{ default: Dict }>> = {
   .then((m) => setDict(lang, m?.default ?? null))
   .catch(() => setDict("en", null))
   .then(() => import("./app"));
+
+// Installable app: a small service worker so the app opens fast and can be added to the home screen.
+if (import.meta.env.PROD && "serviceWorker" in navigator && !document.documentElement.classList.contains("embedded"))
+  addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));

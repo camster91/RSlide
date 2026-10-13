@@ -12,19 +12,24 @@
   "durable_objects": {
     "bindings": [
       { "name": "EVENTS", "class_name": "EventRoom" },
-      // Optional host accounts. They only switch on once email is set up (see EMAIL_FROM below).
-      { "name": "ACCOUNTS", "class_name": "HostAccount" }
+      // Optional host accounts. They switch on once email or single sign-on is set up (see below).
+      { "name": "ACCOUNTS", "class_name": "HostAccount" },
+      // Team workspaces: shared event lists with owner / editor / viewer roles. Needs accounts.
+      { "name": "WORKSPACES", "class_name": "Workspace" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["EventRoom"] },
-    { "tag": "v2", "new_sqlite_classes": ["HostAccount"] }
+    { "tag": "v2", "new_sqlite_classes": ["HostAccount"] },
+    { "tag": "v3", "new_sqlite_classes": ["Workspace"] }
   ],
   // Host accounts send sign-in links by email. Pick one:
   //  - Cloudflare Email Service (Workers paid plan): uncomment the next line and verify your domain
   //    "send_email": [{ "name": "EMAIL", "remote": true }],
   //  - Resend: set the RESEND_API_KEY secret (npx wrangler secret put RESEND_API_KEY)
   // Then set EMAIL_FROM below to an address on your verified domain.
+  // Single sign-on (Microsoft, Google Workspace, Okta…): set OIDC_ISSUER and OIDC_CLIENT_ID below,
+  // and the secret: npx wrangler secret put OIDC_CLIENT_SECRET. See README → Single sign-on.
   // Storage for images in poll options. Remove this block to turn image uploads off.
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "rslide-media" }],
   "vars": {
@@ -35,6 +40,14 @@
     // Sender for sign-in emails, e.g. "signin@yourdomain.com". Empty = host accounts off.
     "EMAIL_FROM": "",
     // Name used in sign-in emails.
-    "APP_NAME": "RSlide"
+    "APP_NAME": "RSlide",
+    // Single sign-on (optional). Issuer URL, e.g. "https://accounts.google.com" or
+    // "https://login.microsoftonline.com/<tenant-id>/v2.0". Empty = off.
+    "OIDC_ISSUER": "",
+    "OIDC_CLIENT_ID": "",
+    // Button label: "Sign in with …"
+    "OIDC_NAME": "",
+    // Only these email domains may sign in with SSO, e.g. "acme.com, acme.ca". Empty = any.
+    "OIDC_ALLOWED_DOMAINS": ""
   }
 }

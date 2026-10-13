@@ -247,7 +247,7 @@ const anaPts = a2.state.me!.quiz!.last!, benPts = b.state.me!.quiz!.last!;
 ok(anaPts > benPts && benPts >= 500 && anaPts <= 1000, `faster answer scores more (${anaPts} vs ${benPts})`);
 ok(a2.snap.leaderboard.top[0].name === "Ana" && a2.state.me!.quiz!.rank === 1, "attendee sees own rank (first)");
 ok(await b.until(() => b.state.me!.quiz?.rank === 2), "second place knows their rank");
-ok(await pres.until(() => pres.snap.polls[0]?.correct?.join() === "1" && !pres.snap.results[qz.id]?.hidden), "big screen shows answer and results after reveal");
+ok(await pres.until(() => pres.snap.polls.find((p) => p.id === qz.id)?.correct?.join() === "1" && !pres.snap.results[qz.id]?.hidden), "big screen shows answer and results after reveal");
 host.send({ type: "setPresentMode", mode: "leaderboard" });
 ok(await pres.until(() => pres.snap.meta.presentMode === "leaderboard"), "leaderboard mode on the big screen");
 

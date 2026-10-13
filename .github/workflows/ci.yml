@@ -27,7 +27,7 @@ jobs:
       - name: Build
         run: |
           # Test-only settings (read at build time): webhooks to this machine, and sign-in links in responses. Never set these in production.
-          printf 'WEBHOOK_ALLOW_PRIVATE="1"\nAUTH_DEV_LINKS="1"\n' > .dev.vars
+          printf 'WEBHOOK_ALLOW_PRIVATE="1"\nAUTH_DEV_LINKS="1"\nOIDC_ISSUER="http://127.0.0.1:9911"\nOIDC_CLIENT_ID="rslide-test"\nOIDC_CLIENT_SECRET="test-secret"\nOIDC_NAME="Test SSO"\nOIDC_ALLOWED_DOMAINS="example.com"\n' > .dev.vars
           npm run build
       - name: Start app
         run: |

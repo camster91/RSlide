@@ -30,7 +30,11 @@ export function collectKeys() {
     const src = readFileSync(f, "utf8");
     for (const m of src.matchAll(new RegExp(String.raw`new UserError\(\s*(?:${STR})`, "g"))) strings.add(unescape(m[1] ?? m[2] ?? m[3]));
     // Errors the HTTP routes send back, e.g. json({ error: "…" }), shown to people as they are.
-    if (f.endsWith("index.ts")) for (const m of src.matchAll(new RegExp(String.raw`\berror:\s*(?:${STR})`, "g"))) strings.add(unescape(m[1] ?? m[2] ?? m[3]));
+    if (/(index|Routes|http)\.ts$/.test(f)) for (const m of src.matchAll(new RegExp(String.raw`\berror:\s*(?:${STR})`, "g"))) strings.add(unescape(m[1] ?? m[2] ?? m[3]));
+    // Messages sent back to the sign-in page after single sign-on.
+    for (const m of src.matchAll(new RegExp(String.raw`\bback\(url,\s*(?:${STR})`, "g"))) strings.add(unescape(m[1] ?? m[2] ?? m[3]));
+    // Messages sent back to the sign-in page after single sign-on.
+    for (const m of src.matchAll(new RegExp(String.raw`\bback\(url,\s*(?:${STR})`, "g"))) strings.add(unescape(m[1] ?? m[2] ?? m[3]));
   }
   return { strings: [...strings].sort(), plurals: [...plurals].sort() };
 }

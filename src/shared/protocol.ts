@@ -11,6 +11,18 @@ export type PresentMode = "auto" | "qa" | "poll" | "leaderboard" | "code";
 export type Identity = "none" | "name" | "email";
 export type ThemeName = "indigo" | "ocean" | "forest" | "berry" | "mono" | "contrast";
 export type ScreenLook = "light" | "dark";
+export const BRAND_FONTS = ["default", "classic", "rounded", "mono"] as const;
+export type BrandFont = (typeof BRAND_FONTS)[number];
+
+/** Custom look for an event (or a whole workspace). Colours are #rrggbb, or null to use the theme. */
+export interface Brand {
+  color: string | null;
+  accent: string | null;
+  font: BrandFont;
+  /** Show only the event logo, not the app name, to attendees and on the big screen. */
+  hideAppName: boolean;
+}
+export const DEFAULT_BRAND: Brand = { color: null, accent: null, font: "default", hideAppName: false };
 
 export const POLL_TYPES: PollType[] = ["multiple", "quiz", "rating", "scale", "ranking", "wordcloud", "open", "points", "grid", "pin", "survey"];
 export const ITEM_TYPES: ItemType[] = ["multiple", "rating", "scale", "ranking", "wordcloud", "open", "points", "grid", "pin"];
@@ -70,6 +82,8 @@ export interface Settings {
   blockedWords: string[];
   /** Event logo (image ID). */
   logo: string | null;
+  /** Custom colours and font. */
+  brand: Brand;
   /** Q&A opens / closes automatically at these times (ms). */
   qaOpensAt: number | null;
   qaClosesAt: number | null;
@@ -77,6 +91,10 @@ export interface Settings {
   deleteAt: number | null;
   /** Use AI to spot questions that mean the same thing (needs Workers AI set up). */
   aiAssist: boolean;
+  /** Self-paced: several polls can be open at once and people answer them in their own time. */
+  selfPaced: boolean;
+  /** Embeddable slides (Google Slides, PowerPoint for the web, Canva…) shown on the big screen, with live polls on top. */
+  deckUrl: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -93,10 +111,13 @@ export const DEFAULT_SETTINGS: Settings = {
   profanity: "off",
   blockedWords: [],
   logo: null,
+  brand: DEFAULT_BRAND,
   qaOpensAt: null,
   qaClosesAt: null,
   deleteAt: null,
   aiAssist: false,
+  selfPaced: false,
+  deckUrl: null,
 };
 
 export interface Label {
@@ -135,6 +156,9 @@ export interface Meta {
   recapSummary?: string;
   /** Only sent to hosts: API key and webhook setup. */
   api?: ApiSetup;
+  /** Only sent to hosts: most attendees allowed at once (0 = no limit), and the plan. */
+  capacity?: number;
+  plan?: "free" | "pro";
 }
 
 /** Things a webhook can be told about. */
@@ -298,6 +322,8 @@ export interface Me {
   quiz: { points: number; rank: number; players: number; last: number | null } | null;
   /** The quiz team this person is on. */
   team: string | null;
+  /** Self-paced events: the right answers to quizzes this person has already answered. */
+  checked?: Record<string, number[]>;
 }
 
 export interface Snapshot {
@@ -421,6 +447,7 @@ export interface EventInfo {
   identity: Identity;
   theme: ThemeName;
   logo: string | null;
+  brand: Brand;
 }
 
 /** Everything needed to copy an event's setup into a new event. */
@@ -460,8 +487,66 @@ export interface Recap {
   summary: string;
   logo: string | null;
   theme: ThemeName;
+  brand: Brand;
   stats: { participants: number; questions: number; votes: number; answers: number };
   questions: { text: string; name: string; score: number; answered: boolean; replies: Reply[] }[];
   polls: { poll: Poll; results: Results }[];
   leaderboard: Leaderboard | null;
+}
+
+// ---------- team workspaces ----------
+
+/** owner: everything, including people and settings. editor: host and add events. viewer: see events, recaps and analytics. */
+export type WorkspaceRole = "owner" | "editor" | "viewer";
+export const WORKSPACE_ROLES: WorkspaceRole[] = ["owner", "editor", "viewer"];
+
+export interface WorkspaceSummary {
+  id: string;
+  name: string;
+  role: WorkspaceRole;
+}
+
+export interface WorkspaceMember {
+  email: string;
+  role: WorkspaceRole;
+  addedAt: number;
+}
+
+export interface WorkspaceEvent {
+  code: string;
+  title: string;
+  addedAt: number;
+  addedBy: string;
+  /** Only for editors and owners. */
+  hostKey?: string;
+}
+
+export interface WorkspaceDetail {
+  id: string;
+  name: string;
+  role: WorkspaceRole;
+  brand: Brand;
+  members: WorkspaceMember[];
+  /** Waiting invites. Only for owners. */
+  invites: { email: string; role: WorkspaceRole; expires: number }[];
+  events: WorkspaceEvent[];
+  plan: "free" | "pro";
+  /** Paid plans are set up on this server. */
+  billing?: boolean;
+  /** Attendees allowed at once per event on each plan (0 = no limit). */
+  limits?: { free: number; pro: number };
+}
+
+/** Headline numbers for one event, used to compare events over time. */
+export interface EventStats {
+  code: string;
+  title: string;
+  createdAt: number;
+  participants: number;
+  peakOnline: number;
+  questions: number;
+  votes: number;
+  polls: number;
+  answers: number;
+  reactions: number;
 }

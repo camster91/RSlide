@@ -7,8 +7,10 @@ export const SESSION_DAYS = 30;
 const TOKEN_MINUTES = 15;
 const MAX_LINKS_PER_15_MIN = 5;
 const MAX_EVENTS = 500;
+export const MAX_WORKSPACES = 20;
 
-import { hex, normEmail, random, sha256 } from "./identity";
+import { normEmail, random, sha256 } from "./identity";
+import type { WorkspaceRole, WorkspaceSummary } from "../shared/protocol";
 
 export interface AccountEvent {
   code: string;
@@ -33,6 +35,7 @@ export class HostAccount extends DurableObject {
       CREATE TABLE IF NOT EXISTS starts (at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, created INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS events (code TEXT PRIMARY KEY, title TEXT NOT NULL, host_key TEXT NOT NULL, added_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, added_at INTEGER NOT NULL);
     `);
   }
 
@@ -68,6 +71,16 @@ export class HostAccount extends DurableObject {
     return { session, email: this.email() };
   }
 
+  /** Single sign-on: the identity provider already checked the email, so go straight to a session. */
+  async ssoSession(email: string): Promise<string> {
+    const now = Date.now();
+    this.clean(now);
+    this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('email', ?)", normEmail(email));
+    const session = random();
+    this.sql.exec("INSERT INTO sessions (hash, expires, created) VALUES (?,?,?)", await sha256(session), now + SESSION_DAYS * 86_400_000, now);
+    return session;
+  }
+
   async checkSession(session: string): Promise<string | null> {
     if (!session) return null;
     const row = this.sql.exec<{ expires: number }>("SELECT expires FROM sessions WHERE hash = ?", await sha256(session)).toArray()[0];
@@ -98,6 +111,28 @@ export class HostAccount extends DurableObject {
 
   async removeEvent(code: string) {
     this.sql.exec("DELETE FROM events WHERE code = ?", code);
+  }
+
+  // ---------- workspaces this person belongs to (the Workspace object is the source of truth) ----------
+
+  async workspaces(): Promise<WorkspaceSummary[]> {
+    return this.sql
+      .exec<{ id: string; name: string; role: WorkspaceRole }>("SELECT id, name, role FROM workspaces ORDER BY added_at")
+      .toArray()
+      .map((w) => ({ id: w.id, name: w.name, role: w.role }));
+  }
+
+  async setWorkspace(w: WorkspaceSummary) {
+    if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM workspaces WHERE id != ?", w.id).one().n >= MAX_WORKSPACES) return false;
+    this.sql.exec(
+      "INSERT INTO workspaces (id, name, role, added_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role",
+      w.id, w.name, w.role, Date.now(),
+    );
+    return true;
+  }
+
+  async dropWorkspace(id: string) {
+    this.sql.exec("DELETE FROM workspaces WHERE id = ?", id);
   }
 
   /** Forgets the account: email, sessions and event list. The events themselves stay. */

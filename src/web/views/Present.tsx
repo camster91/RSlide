@@ -5,12 +5,12 @@ import { activePoll, resultsOf, sortQuestions } from "../../shared/store";
 import { useRoom } from "../lib/room";
 import { t, tj } from "../lib/i18n";
 import { CFG, joinUrl, plural, useTheme, useTitle } from "../lib/util";
-import { Board, Brand, ConnProblem, Confetti, Countdown, Icon, ItemResults, Podium, podiumVisible, QrCode, TeamBoard, ResultsView, TYPE_LABEL, useFloaters } from "../components/ui";
+import { PollPicture, Board, Brand, ConnProblem, Confetti, Countdown, Icon, ItemResults, Podium, podiumVisible, QrCode, TeamBoard, ResultsView, TYPE_LABEL, useFloaters } from "../components/ui";
 
 export function Present({ code }: { code: string }) {
   const key = decodeURIComponent(location.hash.slice(1));
   const floaters = useFloaters();
-  const { state, status } = useRoom(code, "present", { key: key || undefined, onReactions: floaters.add });
+  const { state, status, send } = useRoom(code, "present", { key: key || undefined, onReactions: floaters.add });
   const s = state.snapshot;
   const params = new URLSearchParams(location.search);
   // ?overlay=1: a see-through layer for streaming software (OBS, vMix, StreamYard).
@@ -21,16 +21,41 @@ export function Present({ code }: { code: string }) {
     return () => document.documentElement.classList.remove("overlay-mode");
   }, [overlay]);
   useTitle(s ? `${s.meta.title} · ${CFG.name}` : CFG.name);
-  useTheme(s?.meta.settings.theme, s?.meta.settings.screen ?? "light");
+  useTheme(s?.meta.settings.theme, s?.meta.settings.screen ?? "light", s?.meta.settings.brand);
+  // Slide add-ins: ?poll=ID always shows that poll; &launch=1 starts it when the slide comes up.
+  // ?show=code|qa|leaderboard pins what this screen shows, whatever the host picks.
+  const pinId = params.get("poll");
+  const pinned = pinId && s ? s.polls.find((p) => p.id === pinId) : undefined;
+  const launch = params.has("launch") && !!key;
+  useEffect(() => {
+    if (!launch || !pinned || pinned.status === "active") return;
+    const go = () => document.visibilityState === "visible" && send({ type: "activatePoll", pollId: pinned.id });
+    go();
+    document.addEventListener("visibilitychange", go);
+    return () => document.removeEventListener("visibilitychange", go);
+  }, [launch, pinned?.id, !!pinned && pinned.status === "active"]);
   if (status === "not-found") return <ConnProblem status={status} code={code} />;
 
-  const poll = s ? activePoll(s) : undefined;
+  const poll = pinned ?? (s ? activePoll(s) : undefined);
+  const forced = params.get("show");
   // ?room=ID shows one room's questions, for events with a screen per room.
   const roomParam = params.get("room");
   const room = s?.meta.rooms.find((r) => r.id === roomParam);
-  const mode = !s ? "code" : s.meta.presentMode === "auto" ? (poll ? "poll" : "qa") : s.meta.presentMode;
+  const mode = !s ? "code" : forced === "code" || forced === "qa" || forced === "leaderboard" ? forced : pinned ? "poll" : s.meta.presentMode === "auto" ? (poll ? "poll" : "qa") : s.meta.presentMode;
   const host = location.host;
   if (overlay && s) return <Overlay code={code} s={s} poll={poll} mode={mode} room={room?.id} clockOffset={state.clockOffset} floaters={floaters.layer} />;
+  // The host's own slides (Google Slides, PowerPoint for the web, Canva…) with live polls on top.
+  const deck = s?.meta.settings.deckUrl;
+  if (s && deck && !forced && !pinned && params.get("slides") !== "0")
+    return (
+      <div class="deck-mode">
+        <iframe class="deck" src={deck} title={t("Slides")} allow="fullscreen; autoplay" allowFullScreen />
+        <p class="deck-hint" aria-hidden="true">
+          {t("Click the slides, then use the arrow keys.")}
+        </p>
+        <Overlay code={code} s={s} poll={poll} mode={mode} room={room?.id} clockOffset={state.clockOffset} floaters={floaters.layer} />
+      </div>
+    );
 
   // The join screen fills the whole display: before an event starts, or when nothing is live.
   if (!s || mode === "code" || (mode === "poll" && !poll)) return <JoinHero code={code} host={host} s={s} floaters={floaters.layer} />;
@@ -52,6 +77,7 @@ export function Present({ code }: { code: string }) {
           <h1>{poll.title}</h1>
           {poll.type === "quiz" && !poll.revealed && <Countdown poll={poll} clockOffset={state.clockOffset} big />}
         </div>
+        {poll.type !== "survey" && <PollPicture code={code} item={poll} size="stage" />}
         {poll.type === "quiz" && poll.revealed && <QuizHeadline poll={poll} counts={results.counts ?? []} total={results.total} />}
         {poll.type === "quiz" && !poll.revealed ? (
           <QuizWaiting count={results.total} options={poll.options} />
@@ -144,7 +170,7 @@ export function Present({ code }: { code: string }) {
   return (
     <div class="present">
       <aside>
-        <Brand logo={s?.meta.settings.logo} code={code} />
+        <Brand logo={s?.meta.settings.logo} code={code} hide={s?.meta.settings.brand?.hideAppName} />
         <div>
           <div class="join-at">{t("Join at")}</div>
           <div class="join-host">{host}</div>
@@ -174,7 +200,7 @@ function JoinHero({ code, host, s, floaters }: { code: string; host: string; s: 
   return (
     <div class="present hero-mode">
       <div class="hero-brand">
-        <Brand logo={s?.meta.settings.logo} code={code} />
+        <Brand logo={s?.meta.settings.logo} code={code} hide={s?.meta.settings.brand?.hideAppName} />
       </div>
       <div class="hero">
         <div class="hero-text">
@@ -225,6 +251,7 @@ function SurveyStage({ poll, results, code }: { poll: Poll; results: ReturnType<
         </span>
       </div>
       <h2>{it.title}</h2>
+      <PollPicture code={code} item={it} size="stage" />
       <ItemResults item={it} r={results.items?.[idx] ?? { total: 0 }} code={code} big />
     </div>
   );

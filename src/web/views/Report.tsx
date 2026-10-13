@@ -11,7 +11,7 @@ export function Report({ code }: { code: string }) {
   const { state, status } = useRoom(code, "host", { key });
   const s = state.snapshot;
   useTitle(s ? t("{title} report", { title: s.meta.title }) : CFG.name);
-  useTheme(s?.meta.settings.theme, "light");
+  useTheme(s?.meta.settings.theme, "light", s?.meta.settings.brand);
   useEffect(() => {
     if (new URLSearchParams(location.search).has("print") && s) setTimeout(() => print(), 600);
   }, [!!s]);

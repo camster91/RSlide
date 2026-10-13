@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Q&amp;A and polls</title>
+    <!-- Microsoft Teams app: the tab setup page (?setup=1) and the tab itself (?code=CODE). -->
+    <script src="https://res.cdn.office.net/teams-js/2.24.0/js/MicrosoftTeams.min.js" crossorigin="anonymous"></script>
+    <script src="/config.js"></script>
+    <style>
+      :root { --brand: #3b3fd8; --text: #242424; --muted: #616161; --line: #8a8886; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--text); }
+      html, body { margin: 0; height: 100%; }
+      body.dark { --text: #fff; --muted: #c8c6c4; background: #1f1f1f; }
+      main { max-width: 520px; padding: 20px; }
+      h1 { font-size: 1.2rem; margin: 0 0 6px; }
+      p { margin: 0 0 12px; line-height: 1.45; }
+      .muted { color: var(--muted); font-size: 0.9rem; }
+      label { display: block; font-weight: 600; margin: 14px 0 6px; }
+      input { width: 100%; box-sizing: border-box; padding: 9px 12px; font: inherit; font-size: 1.2rem; letter-spacing: 0.08em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 6px; }
+      input:focus-visible, button:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+      .ok { color: #107c41; font-weight: 600; }
+      .error { color: #c4314b; font-weight: 600; }
+      #frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: none; }
+      body.with-bar #frame { top: 44px; height: calc(100% - 44px); }
+      #bar { display: none; position: fixed; top: 0; left: 0; right: 0; height: 44px; align-items: center; gap: 8px; padding: 0 10px; box-sizing: border-box; border-bottom: 1px solid #e0e0e0; }
+      body.with-bar #bar { display: flex; }
+      button { font: inherit; font-weight: 600; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--brand); background: var(--brand); color: #fff; cursor: pointer; }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main id="setup" class="hidden">
+      <h1>Add live Q&amp;A and polls</h1>
+      <p class="muted">Enter your event code. People in this chat or meeting can then ask, vote and answer right here.</p>
+      <label for="code">Event code</label>
+      <input id="code" maxlength="10" autocomplete="off" placeholder="ABC123" />
+      <p id="status" class="muted" role="status" style="margin-top: 8px">Make an event first on <span id="site"></span>, then copy its code.</p>
+    </main>
+    <div id="bar"><button id="stage" type="button">Show results to everyone</button><span class="muted" id="bar-note"></span></div>
+    <iframe id="frame" title="Live Q&amp;A and polls" allow="clipboard-write"></iframe>
+
+    <script>
+      (function () {
+        var $ = function (id) { return document.getElementById(id); };
+        var params = new URLSearchParams(location.search);
+        var origin = location.origin;
+        var teams = window.microsoftTeams;
+        $("site").textContent = location.host;
+
+        function show(path, withBar) {
+          $("frame").src = path;
+          $("frame").style.display = "block";
+          document.body.classList.toggle("with-bar", !!withBar);
+        }
+
+        // ----- tab setup -----
+        if (params.has("setup")) {
+          $("setup").classList.remove("hidden");
+          if (!teams) { $("status").textContent = "Open this page inside Microsoft Teams."; return; }
+          var timer = null;
+          var ready = function (code, title) {
+            teams.pages.config.registerOnSaveHandler(function (ev) {
+              teams.pages.config
+                .setConfig({ entityId: code, contentUrl: origin + "/apps/teams.html?code=" + code, websiteUrl: origin + "/e/" + code, suggestedDisplayName: title.slice(0, 30) })
+                .then(function () { ev.notifySuccess(); })
+                .catch(function (e) { ev.notifyFailure(String(e)); });
+            });
+            teams.pages.config.setValidityState(true);
+          };
+          $("code").addEventListener("input", function () {
+            var code = this.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+            clearTimeout(timer);
+            teams.pages.config.setValidityState(false);
+            if (code.length < 4) return;
+            timer = setTimeout(function () {
+              fetch("/api/events/" + code)
+                .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+                .then(function (d) { $("status").className = "ok"; $("status").textContent = "Found: " + d.title; ready(code, d.title); })
+                .catch(function () { $("status").className = "error"; $("status").textContent = "No event with code " + code + "."; });
+            }, 350);
+          });
+          teams.app.initialize().then(function () { $("code").focus(); });
+          return;
+        }
+
+        // ----- the tab itself -----
+        var code = (params.get("code") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        if (!code) { location.replace("/"); return; }
+        if (!teams) { location.replace("/e/" + code); return; }
+        teams.app
+          .initialize()
+          .then(function () { return teams.app.getContext(); })
+          .then(function (ctx) {
+            var where = ctx.page && ctx.page.frameContext;
+            if (ctx.app && ctx.app.theme && ctx.app.theme !== "default") document.body.classList.add("dark");
+            if (where === "meetingStage") return show("/present/" + code);
+            if (where === "sidePanel") {
+              show("/e/" + code + "?embed=1", true);
+              // Presenters can put the live results on the meeting stage for everyone.
+              teams.meeting.getAppContentStageSharingCapabilities(function (err, caps) {
+                if (err || !caps || !caps.doesAppHaveSharePermission) {
+                  $("stage").classList.add("hidden");
+                  $("bar-note").textContent = "";
+                  document.body.classList.remove("with-bar");
+                }
+              });
+              $("stage").addEventListener("click", function () {
+                teams.meeting.shareAppContentToStage(function (err) {
+                  $("bar-note").textContent = err ? "Couldn't share: " + (err.message || err.errorCode) : "Shared to the stage.";
+                }, origin + "/apps/teams.html?code=" + code);
+              });
+              return;
+            }
+            show("/e/" + code);
+          })
+          .catch(function () { location.replace("/e/" + code); });
+      })();
+    </script>
+  </body>
+</html>

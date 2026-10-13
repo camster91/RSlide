@@ -3,13 +3,17 @@ import { clean, newCode, newId, normCode } from "./logic";
 import { LIMITS, type EventTemplate } from "../shared/protocol";
 import { templateById } from "../shared/templates";
 import { apiJson, apiKeyFrom, apiPreflight, apiRaw } from "./api";
-import { HostAccount, SESSION_DAYS } from "./accounts";
-import { accountId, isEmail, normEmail } from "./identity";
-import { devMode, mailReady, sendSignIn } from "./mail";
+import { HostAccount } from "./accounts";
+import { Workspace } from "./workspace";
+import { json, session } from "./http";
+import { accountRoutes } from "./accountRoutes";
+import { billingWebhook, workspaceRoutes } from "./workspaceRoutes";
+import { appRoutes } from "./apps";
 
-export { EventRoom, HostAccount };
+export { EventRoom, HostAccount, Workspace };
 
-const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
+/** Shown by /api/health (the status page). */
+const VERSION = "1.0.0";
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 export default {
@@ -32,12 +36,16 @@ export default {
       return apiRaw(r.json, r.status);
     }
     if (parts[1] === "auth" || parts[1] === "me") return accountRoutes(request, env, url, parts);
+    if (parts[1] === "workspaces") return workspaceRoutes(request, env, url, parts);
+    if (parts[1] === "apps") return appRoutes(request, env, url, parts);
+    if (parts[1] === "billing" && parts[2] === "webhook" && request.method === "POST") return billingWebhook(request, env);
+    if (parts[1] === "health") return json({ ok: true, version: VERSION, time: Date.now() });
     if (parts[1] !== "events") return json({ error: "Not found" }, 404);
 
     // POST /api/events → create a new event
     if (parts.length === 2) {
       if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-      const body = (await request.json().catch(() => ({}))) as { title?: string; template?: string; from?: { code?: string; key?: string } };
+      const body = (await request.json().catch(() => ({}))) as { title?: string; template?: string; from?: { code?: string; key?: string }; workspace?: string };
       // Start from a built-in template, or copy one of your own events.
       let template: EventTemplate | null = null;
       let media: string[] = [];
@@ -52,15 +60,29 @@ export default {
         template = templateById(body.template) ?? null;
         if (!template) return json({ error: "Unknown template" }, 400);
       }
+      // Making it in a team workspace: you must be an editor there, and it starts with the workspace's look.
+      const who = await session(request, env);
+      const wsId = typeof body.workspace === "string" && /^[0-9a-f]{16}$/.test(body.workspace) ? body.workspace : null;
+      let wsBrand = null;
+      if (wsId) {
+        if (!who || !env.WORKSPACES) return json({ error: "Sign in first" }, 401);
+        wsBrand = await env.WORKSPACES.getByName(wsId).brandFor(who.email);
+        if (!wsBrand) return json({ error: "You can't add events to this workspace" }, 403);
+        if (!body.from) template = { ...(template ?? { polls: [] }), settings: { ...(template?.settings ?? {}), brand: wsBrand } };
+      }
       const title = clean(body.title, LIMITS.title) || (body.from && template?.title ? `${template.title} (copy)`.slice(0, LIMITS.title) : "Untitled event");
       for (let i = 0; i < 5; i++) {
         const code = newCode();
         const room = env.EVENTS.getByName(code);
         const res = await room.create(code, title);
         if (!res.ok) continue;
-        // Signed-in hosts get the new event added to their account.
-        const who = await session(request, env);
+        // Signed-in hosts get the new event added to their account (and workspace).
         if (who) await who.stub.addEvent({ code, title, hostKey: res.hostKey! });
+        if (who && wsId) {
+          const ws = env.WORKSPACES!.getByName(wsId);
+          await ws.addEvent(who.email, { code, title, hostKey: res.hostKey! });
+          if ((await ws.plan()) === "pro") await room.setPlan("pro");
+        }
         if (template) {
           if (media.length && env.MEDIA) await copyMedia(env.MEDIA, fromCode, code, media);
           await room.applyTemplate(template);
@@ -101,6 +123,11 @@ export default {
         return "error" in r ? json(r, r.error === "Forbidden" ? 403 : 400) : json(r);
       }
       return json({ error: "Not found" }, 404);
+    }
+
+    if (action === "polls" && request.method === "GET") {
+      const list = await room.pollList(key);
+      return list ? json(list) : json({ error: "Forbidden" }, 403);
     }
 
     if (action === "analytics") {
@@ -169,99 +196,5 @@ async function copyMedia(bucket: R2Bucket, from: string, to: string, ids: string
       if (obj) await bucket.put(`events/${to}/${id}`, obj.body, { httpMetadata: obj.httpMetadata });
     }),
   );
-}
-
-// ---------- host accounts ----------
-
-const COOKIE = "rs_session";
-
-function cookie(req: Request, name: string): string {
-  const m = (req.headers.get("cookie") ?? "").match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return m ? decodeURIComponent(m[1]) : "";
-}
-
-function sessionCookie(url: URL, value: string, maxAge: number) {
-  return `${COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${url.protocol === "https:" ? "; Secure" : ""}`;
-}
-
-/** The signed-in host for this request, if any. */
-async function session(req: Request, env: Env) {
-  if (!env.ACCOUNTS || !(mailReady(env) || devMode(env, new URL(req.url).hostname))) return null;
-  const [acct, token] = cookie(req, COOKIE).split(".");
-  if (!acct || !token || !/^[0-9a-f]{32}$/.test(acct)) return null;
-  const stub = env.ACCOUNTS.getByName(acct);
-  const email = await stub.checkSession(token);
-  return email ? { acct, token, stub, email } : null;
-}
-
-async function accountRoutes(req: Request, env: Env, url: URL, parts: string[]): Promise<Response> {
-  const on = !!env.ACCOUNTS && (mailReady(env) || devMode(env, url.hostname));
-  if (parts[1] === "auth" && parts[2] === "config") return json({ accounts: on });
-  if (!on) return json({ error: "Host accounts aren't set up on this server" }, 501);
-  // Changes need a same-site JSON request, so other websites can't act for a signed-in host.
-  if (req.method !== "GET") {
-    const origin = req.headers.get("origin");
-    if (origin && origin !== url.origin) return json({ error: "Forbidden" }, 403);
-    if (req.method === "POST" && !(req.headers.get("content-type") ?? "").includes("application/json")) return json({ error: "Send JSON" }, 415);
-  }
-  const body = req.method === "POST" ? ((await req.json().catch(() => ({}))) as Record<string, unknown>) : {};
-
-  if (parts[1] === "auth") {
-    const what = parts[2];
-    if (what === "start" && req.method === "POST") {
-      const email = normEmail(body.email);
-      if (!isEmail(email)) return json({ error: "Enter a valid email address" }, 400);
-      const acct = await accountId(email);
-      const token = await env.ACCOUNTS!.getByName(acct).startSignIn(email);
-      if (!token) return json({ error: "Too many sign-in links. Wait a few minutes and try again." }, 429);
-      const link = `${url.origin}/signin?a=${acct}&t=${token}`;
-      if (mailReady(env)) {
-        try {
-          await sendSignIn(env, email, link, String(body.lang ?? "en"));
-        } catch (e) {
-          console.error("Sign-in email failed:", (e as Error).message);
-          return json({ error: "We couldn't send the email. Try again soon." }, 502);
-        }
-      }
-      return json({ sent: true, ...(devMode(env, url.hostname) && !mailReady(env) ? { devLink: link } : {}) });
-    }
-    if (what === "finish" && req.method === "POST") {
-      const acct = String(body.a ?? "");
-      if (!/^[0-9a-f]{32}$/.test(acct)) return json({ error: "This sign-in link isn't valid" }, 400);
-      const r = await env.ACCOUNTS!.getByName(acct).finishSignIn(String(body.t ?? ""));
-      if (!r) return json({ error: "This sign-in link has expired or was already used. Ask for a new one." }, 400);
-      return json({ email: r.email }, 200, { "set-cookie": sessionCookie(url, `${acct}.${r.session}`, SESSION_DAYS * 86_400) });
-    }
-    if (what === "signout" && req.method === "POST") {
-      const who = await session(req, env);
-      if (who) await who.stub.signOut(who.token, body.everywhere === true);
-      return json({ ok: true }, 200, { "set-cookie": sessionCookie(url, "", 0) });
-    }
-    return json({ error: "Not found" }, 404);
-  }
-
-  // /api/me…
-  const who = await session(req, env);
-  if (!who) return json({ error: "Sign in first" }, 401);
-  if (parts.length === 2 && req.method === "GET") return json({ email: who.email, events: await who.stub.events() });
-  if (parts.length === 2 && req.method === "DELETE") {
-    await who.stub.deleteAccount();
-    return json({ ok: true }, 200, { "set-cookie": sessionCookie(url, "", 0) });
-  }
-  if (parts[2] === "events" && parts.length === 3 && req.method === "POST") {
-    // Add an event you host (proved by its host key) to your account.
-    const code = normCode(body.code);
-    const key = String(body.key ?? "");
-    const room = env.EVENTS.getByName(code);
-    if (!code || !(await room.isHost(key))) return json({ error: "That isn't a host link for this event" }, 403);
-    const info = await room.info();
-    if (!(await who.stub.addEvent({ code, title: info?.title ?? code, hostKey: key }))) return json({ error: "Your account has the most events allowed" }, 400);
-    return json({ ok: true });
-  }
-  if (parts[2] === "events" && parts[3] && req.method === "DELETE") {
-    await who.stub.removeEvent(normCode(parts[3]));
-    return json({ ok: true });
-  }
-  return json({ error: "Not found" }, 404);
 }
 

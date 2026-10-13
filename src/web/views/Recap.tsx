@@ -15,7 +15,7 @@ export function Recap({ code }: { code: string }) {
   }, [code]);
   const d = data && data !== "missing" ? data : null;
   useTitle(d ? t("{title} recap", { title: d.title }) : CFG.name);
-  useTheme(d?.theme, "light");
+  useTheme(d?.theme, "light", d?.brand);
 
   if (data === "missing")
     return (
@@ -29,7 +29,7 @@ export function Recap({ code }: { code: string }) {
   return (
     <main class="report recap">
       <div class="spread no-print" style={{ marginBottom: 24 }}>
-        <Brand logo={d.logo} code={code} />
+        <Brand logo={d.logo} code={code} hide={d.brand?.hideAppName} />
         <button class="btn sm ghost" onClick={() => print()}>
           {t("Print or save as PDF")}
         </button>

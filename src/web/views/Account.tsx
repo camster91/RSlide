@@ -1,21 +1,26 @@
 import { useEffect, useState } from "preact/hooks";
 import { claimDeviceEvents, postJson, useAccount } from "../lib/account";
 import { lang, t, tj } from "../lib/i18n";
+import type { WorkspaceRole } from "../../shared/protocol";
 import { CFG, navigate, toast, useTheme, useTitle } from "../lib/util";
 import { Empty, Message, TopBar } from "../components/ui";
 
-/** Sign in with an emailed link. Also finishes sign-in when opened from the email. */
+/** Where to go after signing in: only paths on this site. */
+const safeReturn = (p: string | null) => (p && /^\/(?![/\\])/.test(p) ? p : "/events");
+
+/** Sign in with an emailed link or single sign-on. Also finishes sign-in when opened from the email. */
 export function SignIn() {
   useTitle(t("Sign in · {name}", { name: CFG.name }));
   useTheme("indigo");
   const params = new URLSearchParams(location.search);
   const a = params.get("a");
   const tok = params.get("t");
+  const returnTo = safeReturn(params.get("r") ?? params.get("return"));
   const acct = useAccount();
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<{ devLink?: string } | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => (params.get("error") ? t(params.get("error")!) : ""));
 
   // Opened from the email: trade the link for a session.
   useEffect(() => {
@@ -27,7 +32,7 @@ export function SignIn() {
         if (!r.ok) throw new Error(d.error);
         await claimDeviceEvents();
         toast(t("You're signed in"));
-        navigate("/events");
+        navigate(returnTo);
       })
       .catch((e) => setError(t((e as Error).message) || t("Something went wrong. Try again.")));
   }, []);
@@ -55,7 +60,7 @@ export function SignIn() {
     setBusy(true);
     setError("");
     try {
-      const r = await postJson("/api/auth/start", { email, lang });
+      const r = await postJson("/api/auth/start", { email, lang, return: returnTo });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       setSent(d);
@@ -87,19 +92,30 @@ export function SignIn() {
               </button>
             </>
           ) : (
-            <form class="stack" onSubmit={submit}>
+            <div class="stack">
               <h1>{t("Sign in")}</h1>
-              <p class="muted">{t("Keep all the events you host in one place, on any device. No password: we email you a link.")}</p>
-              {error && <p class="notice bad small">{error}</p>}
-              <label class="label" for="email">
-                {t("Email")}
-              </label>
-              <input id="email" class="input" type="email" autoComplete="email" required maxLength={120} value={email} onInput={(e) => setEmail(e.currentTarget.value)} />
-              <button class="btn accent lg block" disabled={busy}>
-                {busy ? t("Sending…") : t("Email me a sign-in link")}
-              </button>
+              <p class="muted">{t("Keep all the events you host in one place, on any device, and share them with your team.")}</p>
+              {error && <p class="notice bad small" role="alert">{error}</p>}
+              {acct.sso && (
+                <a class="btn lg block sso-btn" href={`/api/auth/sso/start?return=${encodeURIComponent(returnTo)}`} onClick={(e) => (e.preventDefault(), location.assign((e.currentTarget as HTMLAnchorElement).href))}>
+                  {t("Sign in with {name}", { name: acct.sso })}
+                </a>
+              )}
+              {acct.sso && acct.emailSignIn && <p class="or-line muted small">{t("or")}</p>}
+              {acct.emailSignIn && (
+                <form class="stack" onSubmit={submit}>
+                  <label class="label" for="email">
+                    {t("Email")}
+                  </label>
+                  <input id="email" class="input" type="email" autoComplete="email" required maxLength={120} value={email} onInput={(e) => setEmail(e.currentTarget.value)} />
+                  <button class="btn accent lg block" disabled={busy}>
+                    {busy ? t("Sending…") : t("Email me a sign-in link")}
+                  </button>
+                  <p class="muted tiny">{t("No password: we email you a link.")}</p>
+                </form>
+              )}
               <p class="muted tiny">{t("Attendees never need an account. Hosting without one works too.")}</p>
-            </form>
+            </div>
           )}
         </div>
       </main>
@@ -150,6 +166,13 @@ export function MyEvents() {
             {t("New event")}
           </a>
         </div>
+        <Workspaces />
+        <div class="spread">
+          <h2>{t("Your events")}</h2>
+          <a class="btn sm ghost" href="/insights">
+            {t("Insights")}
+          </a>
+        </div>
         {acct.events.length ? (
           <ul class="my-events">
             {acct.events.map((e) => (
@@ -195,5 +218,59 @@ export function MyEvents() {
         </div>
       </main>
     </>
+  );
+}
+
+/** The team workspaces you're in, and a form to start a new one. */
+function Workspaces() {
+  const acct = useAccount();
+  const [name, setName] = useState("");
+  const [open, setOpen] = useState(false);
+  const roles: Record<WorkspaceRole, string> = { owner: t("Owner"), editor: t("Editor"), viewer: t("Viewer") };
+  const create = async (e: Event) => {
+    e.preventDefault();
+    const r = await postJson("/api/workspaces", { name });
+    const d = await r.json();
+    if (!r.ok) return toast(t(d.error));
+    await acct.refresh();
+    navigate(`/teams/${d.id}#people`);
+  };
+  return (
+    <section class="stack">
+      <div class="spread">
+        <h2>{t("Team workspaces")}</h2>
+        {!open && (
+          <button class="btn sm ghost" onClick={() => setOpen(true)}>
+            {t("New workspace")}
+          </button>
+        )}
+      </div>
+      {open && (
+        <form class="panel row" style={{ flexWrap: "nowrap" }} onSubmit={create}>
+          <label class="sr-only" for="new-ws">
+            {t("Workspace name")}
+          </label>
+          <input id="new-ws" class="input" autoFocus required maxLength={60} placeholder={t("e.g. Marketing team")} value={name} onInput={(e) => setName(e.currentTarget.value)} />
+          <button class="btn accent">{t("Create")}</button>
+          <button type="button" class="btn quiet" onClick={() => setOpen(false)}>
+            {t("Cancel")}
+          </button>
+        </form>
+      )}
+      {acct.workspaces.length ? (
+        <ul class="ws-list">
+          {acct.workspaces.map((w) => (
+            <li key={w.id}>
+              <a class="panel ws-card" href={`/teams/${w.id}`}>
+                <b>{w.name}</b>
+                <span class="chip">{roles[w.role]}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        !open && <p class="muted small">{t("Share events with your team. Everyone sees the same list, with their own role.")}</p>
+      )}
+    </section>
   );
 }

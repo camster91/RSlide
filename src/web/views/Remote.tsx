@@ -31,7 +31,7 @@ export function Remote({ code }: { code: string }) {
   const { state, status, send } = useRoom(code, "host", { key });
   const s = state.snapshot;
   useTitle(s ? t("Remote: {title}", { title: s.meta.title }) : CFG.name);
-  useTheme(s?.meta.settings.theme);
+  useTheme(s?.meta.settings.theme, "auto", s?.meta.settings.brand);
   useWakeLock();
   // The last poll this remote launched, so "Next" still works after a poll is stopped.
   const cursor = useRef<string | null>(null);

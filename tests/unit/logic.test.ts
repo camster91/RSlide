@@ -27,6 +27,12 @@ describe("validatePoll", () => {
     const p = validatePoll(draft({ title: "  Best   option? ", options: ["A", " ", "B "], multi: true }));
     expect(p).toMatchObject({ type: "multiple", title: "Best option?", options: ["A", "B"], multi: true });
   });
+  it("keeps an optional picture on any question, and requires one for pin questions", () => {
+    expect(validatePoll(draft({ image: "abcdefabcdef" })).image).toBe("abcdefabcdef");
+    expect(validatePoll(draft({ image: "../etc/passwd" })).image).toBeNull();
+    expect(validatePoll(draft()).image).toBeNull();
+    expect(() => validatePoll(draft({ type: "pin", options: [] }))).toThrow("picture");
+  });
   it("needs a title and two options", () => {
     expect(() => validatePoll(draft({ title: "" }))).toThrow(UserError);
     expect(() => validatePoll(draft({ options: ["a"] }))).toThrow("at least 2");
@@ -297,5 +303,26 @@ describe("team scores", () => {
     const r = teamScores(teams, teamOf, scores);
     expect(r.map((x) => x.id)).toEqual(["b", "a", "c"]);
     expect(r.reduce((n, x) => n + x.points, 0)).toBe(1800);
+  });
+});
+
+import { cleanDeckUrl } from "../../src/worker/logic";
+describe("cleanDeckUrl", () => {
+  it("turns Google Slides links into embed links", () => {
+    expect(cleanDeckUrl("https://docs.google.com/presentation/d/1AbC_d-9/edit#slide=id.p")).toBe("https://docs.google.com/presentation/d/1AbC_d-9/embed?start=false&loop=false&rm=minimal");
+    expect(cleanDeckUrl("https://docs.google.com/presentation/d/e/2PACX-1vX/pub?start=false")).toBe("https://docs.google.com/presentation/d/e/2PACX-1vX/embed?start=false&loop=false");
+  });
+  it("takes the link out of pasted iframe code", () => {
+    expect(cleanDeckUrl('<iframe src="https://onedrive.live.com/embed?resid=1&amp;em=2" width="1"></iframe>')).toBe("https://onedrive.live.com/embed?resid=1&em=2");
+  });
+  it("makes Canva links embeddable", () => {
+    expect(cleanDeckUrl("https://www.canva.com/design/DAF1/abc/view")).toBe("https://www.canva.com/design/DAF1/abc/view?embed");
+  });
+  it("refuses non-https links and allows clearing", () => {
+    expect(() => cleanDeckUrl("http://example.com/x")).toThrow("https");
+    expect(() => cleanDeckUrl("javascript:alert(1)")).toThrow("https");
+    expect(() => cleanDeckUrl("not a link")).toThrow("https");
+    expect(cleanDeckUrl("")).toBeNull();
+    expect(cleanDeckUrl(null)).toBeNull();
   });
 });
