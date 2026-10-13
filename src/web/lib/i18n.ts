@@ -53,14 +53,20 @@ export function chooseLang(l: Lang) {
 const fill = (s: string, vars?: Record<string, string | number>) =>
   vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? (typeof vars[k] === "number" ? (vars[k] as number).toLocaleString(lang) : String(vars[k])) : m)) : s;
 
+/** English shown when there's no translation. "Answered||tab" adds a note for translators: shows "Answered". */
+const english = (key: string) => {
+  const i = key.indexOf("||");
+  return i < 0 ? key : key.slice(0, i);
+};
+
 /** Translates a piece of English text. */
 export function t(en: string, vars?: Record<string, string | number>): string {
-  return fill(dict?.strings[en] ?? en, vars);
+  return fill(dict?.strings[en] ?? english(en), vars);
 }
 
 /** Like t(), but the {values} can be elements, such as a bold code or a link. */
 export function tj(en: string, vars: Record<string, ComponentChildren>): ComponentChildren[] {
-  const s = dict?.strings[en] ?? en;
+  const s = dict?.strings[en] ?? english(en);
   return s.split(/(\{\w+\})/).map((part) => {
     const m = part.match(/^\{(\w+)\}$/);
     return m && m[1] in vars ? vars[m[1]] : part;

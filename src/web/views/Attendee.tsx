@@ -3,6 +3,7 @@ import { MAIN_ROOM, POINTS_BUDGET, REACTIONS, type EventInfo, type Item, type La
 import { activePoll, resultsOf, secondsLeft, sortQuestions } from "../../shared/store";
 import { findSimilar } from "../../shared/similar";
 import { useRoom, type Send } from "../lib/room";
+import { t, tj, lang } from "../lib/i18n";
 import { CFG, fetchEvent, mediaUrl, passcodeFor, plural, savePasscode, store, toast, useTheme, useTitle } from "../lib/util";
 import { Board, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, PinMap, Podium, QuestionLabels, Replies, whenText, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
 
@@ -43,18 +44,18 @@ function PasscodeGate({ code, title, onDone, wrong }: { code: string; title: str
         class="gate"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!v.trim()) return toast("Type the passcode");
+          if (!v.trim()) return toast(t("Type the passcode"));
           savePasscode(code, v.trim());
           onDone(v.trim());
         }}
       >
         <div class="panel stack">
           <p class="muted">{title}</p>
-          <h1>Enter the passcode</h1>
-          <p class="muted">The host has locked this event. Ask them for the passcode.</p>
-          {wrong && <p style={{ color: "var(--danger)", fontWeight: 600 }}>That passcode didn't work. Try again.</p>}
-          <input class="input" aria-label="Passcode" autoFocus autoComplete="off" value={v} onInput={(e) => setV(e.currentTarget.value)} />
-          <button class="btn block lg">Join event</button>
+          <h1>{t("Enter the passcode")}</h1>
+          <p class="muted">{t("The host has locked this event. Ask them for the passcode.")}</p>
+          {wrong && <p style={{ color: "var(--danger)", fontWeight: 600 }}>{t("That passcode didn't work. Try again.")}</p>}
+          <input class="input" aria-label={t("Passcode")} autoFocus autoComplete="off" value={v} onInput={(e) => setV(e.currentTarget.value)} />
+          <button class="btn block lg">{t("Join event")}</button>
         </div>
       </form>
     </>
@@ -71,34 +72,34 @@ function JoinGate({ title, email, send, initialName }: { title: string; email: b
         class="gate"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!name.trim()) return toast("Enter your name");
-          if (email && !mail.trim()) return toast("Enter your email");
+          if (!name.trim()) return toast(t("Enter your name"));
+          if (email && !mail.trim()) return toast(t("Enter your email"));
           store.set("rs.name", name.trim());
           if (email) store.set("rs.email", mail.trim());
           send({ type: "join", name: name.trim(), ...(email ? { email: mail.trim() } : {}) });
         }}
       >
         <div class="panel stack">
-          <h1>Before you join</h1>
-          <p class="muted">{email ? "The host asks everyone for their name and email." : "The host asks everyone for their name."}</p>
+          <h1>{t("Before you join")}</h1>
+          <p class="muted">{email ? t("The host asks everyone for their name and email.") : t("The host asks everyone for their name.")}</p>
           <div>
             <label class="label" for="jn">
-              Your name
+              {t("Your name")}
             </label>
             <input id="jn" class="input" autoComplete="name" maxLength={40} autoFocus value={name} onInput={(e) => setName(e.currentTarget.value)} />
           </div>
           {email && (
             <div>
               <label class="label" for="je">
-                Your email
+                {t("Your email")}
               </label>
               <input id="je" class="input" type="email" autoComplete="email" maxLength={120} value={mail} onInput={(e) => setMail(e.currentTarget.value)} />
               <p class="muted tiny" style={{ marginTop: 6 }}>
-                Only the host sees your email.
+                {t("Only the host sees your email.")}
               </p>
             </div>
           )}
-          <button class="btn block lg">Continue</button>
+          <button class="btn block lg">{t("Continue")}</button>
         </div>
       </form>
     </>
@@ -127,7 +128,7 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
   if (status === "passcode") return <TopBar />;
   const problem = ConnProblem({ status, code });
   if (problem) return problem;
-  if (!s || !me) return <TopBar title="Connecting…" />;
+  if (!s || !me) return <TopBar title={t("Connecting…")} />;
   if (!me.joined) return <JoinGate title={s.meta.title} email={s.meta.settings.identity === "email"} send={send} initialName={store.get("rs.name", "")} />;
 
   const poll = activePoll(s);
@@ -146,20 +147,20 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
         {current === "board" && <BoardTab s={s} me={me} />}
         {s.meta.settings.reactions && current !== "board" && <ReactBar send={send} />}
       </main>
-      <nav class="bottom-nav" aria-label="Sections">
+      <nav class="bottom-nav" aria-label={t("Sections")}>
         <button aria-current={current === "qa" ? "page" : undefined} onClick={() => setTab("qa")}>
           <Icon.chat />
-          Q&amp;A
+          {t("Q&A")}
         </button>
         <button aria-current={current === "polls" ? "page" : undefined} onClick={() => setTab("polls")}>
           <Icon.chart />
-          Polls
-          {poll && current !== "polls" && <span class="pip" aria-label="A poll is live" />}
+          {t("Polls")}
+          {poll && current !== "polls" && <span class="pip" aria-label={t("A poll is live")} />}
         </button>
         {showBoard && (
           <button aria-current={current === "board" ? "page" : undefined} onClick={() => setTab("board")}>
             <Icon.trophy />
-            Leaderboard
+            {t("Leaderboard")}
           </button>
         )}
       </nav>
@@ -170,7 +171,7 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
 function NoPoll() {
   return (
     <div class="poll-card">
-      <Empty title="No poll right now">When the host starts one, it shows up here.</Empty>
+      <Empty title={t("No poll right now")}>{t("When the host starts one, it shows up here.")}</Empty>
     </div>
   );
 }
@@ -206,18 +207,18 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
 
   const ask = (e: Event) => {
     e.preventDefault();
-    const t = text.trim();
-    if (!t) return toast("Type your question first");
+    const msg = text.trim();
+    if (!msg) return toast(t("Type your question first"));
     if (!named) store.set("rs.name", name.trim());
-    send({ type: "ask", text: t, name: named ? undefined : name.trim(), room: roomId });
+    send({ type: "ask", text: msg, name: named ? undefined : name.trim(), room: roomId });
     setText("");
-    toast(settings.moderation ? "Sent. The host will review it soon." : "Question sent");
+    toast(settings.moderation ? t("Sent. The host will review it soon.") : t("Question sent"));
   };
 
   return (
     <>
       {rooms.length > 1 && (
-        <div class="room-tabs" role="group" aria-label="Q&A rooms">
+        <div class="room-tabs" role="group" aria-label={t("Q&A rooms")}>
           {rooms.map((r) => (
             <button key={r.id} aria-pressed={r.id === roomId} onClick={() => pickRoom(r.id)}>
               {r.name}
@@ -228,47 +229,47 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
       )}
       {s.meta.recapPublic && (
         <a class="notice recap-link" href={`/recap/${s.meta.code}`}>
-          The host shared a recap of this event. <b>See the recap</b>
+          {t("The host shared a recap of this event.")} <b>{t("See the recap")}</b>
         </a>
       )}
-      {!settings.qaOpen && settings.qaOpensAt && <p class="notice">Questions open at {whenText(settings.qaOpensAt)}.</p>}
-      {settings.qaOpen && settings.qaClosesAt && <p class="notice">Questions close at {whenText(settings.qaClosesAt)}.</p>}
+      {!settings.qaOpen && settings.qaOpensAt && <p class="notice">{t("Questions open at {time}.", { time: whenText(settings.qaOpensAt) })}</p>}
+      {settings.qaOpen && settings.qaClosesAt && <p class="notice">{t("Questions close at {time}.", { time: whenText(settings.qaClosesAt) })}</p>}
       <form class="ask" onSubmit={ask}>
         <label class="sr-only" for="qtext">
-          Your question
+          {t("Your question")}
         </label>
         <textarea
           id="qtext"
           class="input"
           maxLength={300}
-          placeholder={settings.qaOpen ? "Ask the speaker a question" : "Questions are closed for now"}
+          placeholder={settings.qaOpen ? t("Ask the speaker a question") : t("Questions are closed for now")}
           disabled={!settings.qaOpen}
           value={text}
           onInput={(e) => setText(e.currentTarget.value)}
         />
         <div class="row nowrap">
           {named ? (
-            <span class="grow muted small">Asking as {me.name}</span>
+            <span class="grow muted small">{t("Asking as {name}", { name: me.name })}</span>
           ) : (
             <input
               class="input name grow"
               maxLength={40}
-              aria-label="Your name"
-              placeholder={settings.allowAnonymous ? "Your name (optional)" : "Your name"}
+              aria-label={t("Your name")}
+              placeholder={settings.allowAnonymous ? t("Your name (optional)") : t("Your name")}
               disabled={!settings.qaOpen}
               value={name}
               onInput={(e) => setName(e.currentTarget.value)}
             />
           )}
           <button class="btn accent" disabled={!settings.qaOpen || !text.trim()}>
-            Send
+            {t("Send")}
           </button>
         </div>
-        {settings.qaOpen && settings.moderation && <p class="muted tiny" style={{ marginTop: 8 }}>The host reviews questions before they appear.</p>}
+        {settings.qaOpen && settings.moderation && <p class="muted tiny" style={{ marginTop: 8 }}>{t("The host reviews questions before they appear.")}</p>}
         {similar.length > 0 && (
           <div class="similar" aria-live="polite">
             <p class="small">
-              <b>Already asked?</b> <span class="muted">Upvote it instead, and it rises to the top.</span>
+              <b>{t("Already asked?")}</b> <span class="muted">{t("Upvote it instead, and it rises to the top.")}</span>
             </p>
             {similar.map(({ item: q }) => (
               <div class="similar-q" key={q.id}>
@@ -280,7 +281,7 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
                   onClick={() => {
                     if (!ups.has(q.id)) send({ type: "vote", id: q.id, dir: 1 });
                     setText("");
-                    toast("Upvoted. Thanks!");
+                    toast(t("Upvoted. Thanks!"));
                   }}
                 >
                   <Icon.up /> {q.votes - q.downs}
@@ -293,10 +294,10 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
 
       <div class="spread">
         <b>{plural(visible, "question")}</b>
-        <div class="seg" role="group" aria-label="Sort questions">
+        <div class="seg" role="group" aria-label={t("Sort questions")}>
           {(["popular", "recent"] as const).map((m) => (
             <button key={m} aria-pressed={sort === m} onClick={() => setSort(m)}>
-              {m === "popular" ? "Popular" : "Recent"}
+              {m === "popular" ? t("Popular") : t("Recent")}
             </button>
           ))}
         </div>
@@ -322,7 +323,7 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
         </div>
       ) : (
         <div class="poll-card">
-          <Empty title="No questions yet">Ask the first one. Others can upvote it.</Empty>
+          <Empty title={t("No questions yet")}>{t("Ask the first one. Others can upvote it.")}</Empty>
         </div>
       )}
     </>
@@ -332,8 +333,8 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
   useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(timer);
   }, [value, ms]);
   return v;
 }
@@ -360,7 +361,7 @@ function AttendeeQuestion({ q, up, down, mine, downvotes, labels, canReply, myRe
       <div class="body">
         {q.highlighted && (
           <span class="tag hl" style={{ marginBottom: 6 }}>
-            Now answering
+            {t("Now answering")}
           </span>
         )}
         {editing ? (
@@ -368,16 +369,16 @@ function AttendeeQuestion({ q, up, down, mine, downvotes, labels, canReply, myRe
             class="stack-sm"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!draft.trim()) return toast("Question can't be empty");
+              if (!draft.trim()) return toast(t("Question can't be empty"));
               send({ type: "editQuestion", id: q.id, text: draft.trim() });
               setEditing(false);
             }}
           >
-            <textarea class="input" maxLength={300} value={draft} onInput={(e) => setDraft(e.currentTarget.value)} aria-label="Edit your question" />
+            <textarea class="input" maxLength={300} value={draft} onInput={(e) => setDraft(e.currentTarget.value)} aria-label={t("Edit your question")} />
             <div class="row">
-              <button class="btn sm">Save</button>
+              <button class="btn sm">{t("Save")}</button>
               <button type="button" class="btn sm ghost" onClick={() => setEditing(false)}>
-                Cancel
+                {t("Cancel")}
               </button>
             </div>
           </form>
@@ -389,7 +390,7 @@ function AttendeeQuestion({ q, up, down, mine, downvotes, labels, canReply, myRe
         <Replies replies={q.replies} canDelete={(r) => myReplies.has(r.id)} onDelete={(r) => send({ type: "deleteReply", id: q.id, replyId: r.id })} />
         {canReply && !replying && (
           <button class="link-btn" style={{ marginTop: 8 }} onClick={() => setReplying(true)}>
-            Reply
+            {t("Reply")}
           </button>
         )}
         {replying && (
@@ -397,16 +398,16 @@ function AttendeeQuestion({ q, up, down, mine, downvotes, labels, canReply, myRe
             class="reply-form"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!reply.trim()) return toast("Type a reply first");
+              if (!reply.trim()) return toast(t("Type a reply first"));
               send({ type: "reply", id: q.id, text: reply.trim(), name: defaultName.trim() || undefined });
               setReply("");
               setReplying(false);
             }}
           >
-            <input class="input" maxLength={300} placeholder="Write a reply" aria-label="Your reply" autoFocus value={reply} onInput={(e) => setReply(e.currentTarget.value)} />
-            <button class="btn sm">Send</button>
+            <input class="input" maxLength={300} placeholder={t("Write a reply")} aria-label={t("Your reply")} autoFocus value={reply} onInput={(e) => setReply(e.currentTarget.value)} />
+            <button class="btn sm">{t("Send")}</button>
             <button type="button" class="btn sm quiet" onClick={() => setReplying(false)}>
-              Cancel
+              {t("Cancel")}
             </button>
           </form>
         )}
@@ -420,23 +421,23 @@ function AttendeeQuestion({ q, up, down, mine, downvotes, labels, canReply, myRe
                   setEditing(true);
                 }}
               >
-                Edit
+                {t("Edit")}
               </button>
             )}
-            <button class="btn sm quiet" onClick={() => confirm("Withdraw your question?") && send({ type: "withdraw", id: q.id })}>
-              Withdraw
+            <button class="btn sm quiet" onClick={() => confirm(t("Withdraw your question?")) && send({ type: "withdraw", id: q.id })}>
+              {t("Withdraw")}
             </button>
           </div>
         )}
       </div>
       {q.status !== "pending" && (
         <div class="voter">
-          <button class={`vote num ${up ? "on" : ""}`} aria-label={`Upvote. Score ${q.votes - q.downs}`} aria-pressed={up} onClick={() => send({ type: "vote", id: q.id, dir: 1 })}>
+          <button class={`vote num ${up ? "on" : ""}`} aria-label={t("Upvote. Score {score}", { score: q.votes - q.downs })} aria-pressed={up} onClick={() => send({ type: "vote", id: q.id, dir: 1 })}>
             <Icon.up />
             <span>{q.votes - q.downs}</span>
           </button>
           {downvotes && (
-            <button class={`down ${down ? "on" : ""}`} aria-label="Downvote" aria-pressed={down} onClick={() => send({ type: "vote", id: q.id, dir: -1 })}>
+            <button class={`down ${down ? "on" : ""}`} aria-label={t("Downvote")} aria-pressed={down} onClick={() => send({ type: "vote", id: q.id, dir: -1 })}>
               <Icon.down />
             </button>
           )}
@@ -450,9 +451,9 @@ function AttendeeQuestion({ q, up, down, mine, downvotes, labels, canReply, myRe
 
 function ReactBar({ send }: { send: Send }) {
   return (
-    <div class="react-bar" role="group" aria-label="Send a reaction to the big screen">
+    <div class="react-bar" role="group" aria-label={t("Send a reaction to the big screen")}>
       {REACTIONS.map((e) => (
-        <button key={e} aria-label={`React ${e}`} onClick={() => send({ type: "react", emoji: e })}>
+        <button key={e} aria-label={t("React {emoji}", { emoji: e })} onClick={() => send({ type: "react", emoji: e })}>
           {e}
         </button>
       ))}
@@ -505,7 +506,7 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
             );
           })}
         </div>
-        {item.multi && <p class="muted small" style={{ marginTop: 8 }}>Pick all that apply.</p>}
+        {item.multi && <p class="muted small" style={{ marginTop: 8 }}>{t("Pick all that apply.")}</p>}
       </>
     );
   }
@@ -524,11 +525,11 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
           <label class="points-row" key={i}>
             <span>{o}</span>
             <b>{vals[i]}</b>
-            <input type="range" min={0} max={POINTS_BUDGET} step={5} value={vals[i]} disabled={disabled} aria-label={`Points for ${o}`} onInput={(e) => set(i, Number(e.currentTarget.value))} />
+            <input type="range" min={0} max={POINTS_BUDGET} step={5} value={vals[i]} disabled={disabled} aria-label={t("Points for {option}", { option: o })} onInput={(e) => set(i, Number(e.currentTarget.value))} />
           </label>
         ))}
         <div class={`points-left ${left < 0 ? "over" : ""}`} aria-live="polite">
-          <span>Points left</span>
+          <span>{t("Points left")}</span>
           <span class="num">{left}</span>
         </div>
       </div>
@@ -543,7 +544,7 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
     return (
       <div class="grid-answer">
         <p class="muted small">
-          Score each option from {r.min} to {r.max}.
+          {t("Score each option from {min} to {max}.", { min: r.min, max: r.max })}
         </p>
         {item.options.map((o, i) => (
           <fieldset key={i}>
@@ -572,9 +573,9 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
     return item.image ? (
       <div>
         <p class="muted small" style={{ marginBottom: 8 }}>
-          Tap the picture to drop your pin. Tap again to move it.
+          {t("Tap the picture to drop your pin. Tap again to move it.")}
         </p>
-        <div class="pin-wrap pin-tap" onClick={tap} role="button" aria-label="Picture to tap on">
+        <div class="pin-wrap pin-tap" onClick={tap} role="button" aria-label={t("Picture to tap on")}>
           <img src={mediaUrl(code, item.image)} alt="" />
           {xy && <i class="pin-dot mine" style={{ left: `${xy[0] * 100}%`, top: `${xy[1] * 100}%` }} />}
         </div>
@@ -584,7 +585,7 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
   if (item.type === "rating") {
     const v = typeof value === "number" ? value : 0;
     return (
-      <div class="stars" role="radiogroup" aria-label="Rating">
+      <div class="stars" role="radiogroup" aria-label={t("Rating")}>
         {Array.from({ length: item.scale || 5 }, (_, i) => (
           <button
             type="button"
@@ -593,7 +594,7 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
             aria-checked={v === i + 1}
             disabled={disabled}
             class={`star ${i < v ? "on" : ""}`}
-            aria-label={`${i + 1} star${i ? "s" : ""}`}
+            aria-label={plural(i + 1, "star")}
             onClick={() => {
               onChange(i + 1);
               onPick?.(i + 1);
@@ -610,7 +611,7 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
     const nums = Array.from({ length: r.max - r.min + 1 }, (_, i) => r.min + i);
     return (
       <div>
-        <div class="scale" role="radiogroup" aria-label="Scale">
+        <div class="scale" role="radiogroup" aria-label={t("Scale")}>
           {nums.map((n) => (
             <button
               type="button"
@@ -647,7 +648,7 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
     return (
       <div>
         <p class="muted small" style={{ marginBottom: 10 }}>
-          Put your favourite at the top. Use the arrows to move options.
+          {t("Put your favourite at the top. Use the arrows to move options.")}
         </p>
         <ol class="rank-list" style={{ padding: 0, margin: 0, listStyle: "none" }}>
           {order.map((opt, pos) => (
@@ -656,10 +657,10 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
               {item.images?.[opt] && <img src={mediaUrl(code, item.images[opt]!)} alt="" />}
               <span class="grow">{item.options[opt]}</span>
               <span class="moves">
-                <button type="button" class="btn sm ghost" disabled={disabled || pos === 0} aria-label={`Move ${item.options[opt]} up`} onClick={() => move(pos, -1)}>
+                <button type="button" class="btn sm ghost" disabled={disabled || pos === 0} aria-label={t("Move {option} up", { option: item.options[opt] })} onClick={() => move(pos, -1)}>
                   ↑
                 </button>
-                <button type="button" class="btn sm ghost" disabled={disabled || pos === order.length - 1} aria-label={`Move ${item.options[opt]} down`} onClick={() => move(pos, 1)}>
+                <button type="button" class="btn sm ghost" disabled={disabled || pos === order.length - 1} aria-label={t("Move {option} down", { option: item.options[opt] })} onClick={() => move(pos, 1)}>
                   ↓
                 </button>
               </span>
@@ -670,9 +671,9 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
     );
   }
   if (item.type === "wordcloud")
-    return <input class="input" maxLength={30} placeholder="A word or short phrase" aria-label="Your word" disabled={disabled} value={typeof value === "string" ? value : ""} onInput={(e) => onChange(e.currentTarget.value)} />;
+    return <input class="input" maxLength={30} placeholder={t("A word or short phrase")} aria-label={t("Your word")} disabled={disabled} value={typeof value === "string" ? value : ""} onInput={(e) => onChange(e.currentTarget.value)} />;
   if (item.type === "open")
-    return <textarea class="input" maxLength={200} placeholder="Your answer" aria-label="Your answer" disabled={disabled} value={typeof value === "string" ? value : ""} onInput={(e) => onChange(e.currentTarget.value)} />;
+    return <textarea class="input" maxLength={200} placeholder={t("Your answer")} aria-label={t("Your answer")} disabled={disabled} value={typeof value === "string" ? value : ""} onInput={(e) => onChange(e.currentTarget.value)} />;
   return null;
 }
 
@@ -717,7 +718,7 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
 
   const submit = (v = draft) => {
     const wire = toWire(item, v);
-    if (wire === null) return toast(freeText ? "Type something first" : "Pick an answer first");
+    if (wire === null) return toast(freeText ? t("Type something first") : t("Pick an answer first"));
     send({ type: "respond", pollId: poll.id, value: wire });
     if (freeText) setDraft("");
   };
@@ -725,7 +726,7 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
   return (
     <div class="poll-card">
       <div class="spread">
-        <span class="tag live">Live</span>
+        <span class="tag live">{t("Live")}</span>
         <span class="muted small">{TYPE_LABEL[poll.type]}</span>
       </div>
       <h2>{poll.title}</h2>
@@ -748,13 +749,13 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
       {!oneTap && (
         <div class="row" style={{ marginTop: 14 }}>
           <button class="btn accent" onClick={() => submit()}>
-            {answered && !freeText ? "Update answer" : "Send"}
+            {answered && !freeText ? t("Update answer") : t("Send")}
           </button>
         </div>
       )}
       {answered && (
         <p class="muted small" style={{ marginTop: 10 }}>
-          ✓ {freeText ? "Sent. You can send another." : poll.type === "pin" ? "Pin dropped." : oneTap ? "Answer saved. Tap again to change it." : "Answer saved."}
+          ✓ {freeText ? t("Sent. You can send another.") : poll.type === "pin" ? t("Pin dropped.") : oneTap ? t("Answer saved. Tap again to change it.") : t("Answer saved.")}
         </p>
       )}
       {answered && (
@@ -765,9 +766,9 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
                 {poll.image && (
                   <PinMap src={mediaUrl(code, poll.image)} pins={results.pins ?? []} big={false} mine={mine as unknown as [number, number]} />
                 )}
-                {!results.pins && <p class="muted small">The host is keeping other people's pins hidden for now.</p>}
+                {!results.pins && <p class="muted small">{t("The host is keeping other people's pins hidden for now.")}</p>}
                 <button class="btn ghost sm" style={{ marginTop: 10 }} onClick={() => setMovingPin(true)}>
-                  Move my pin
+                  {t("Move my pin")}
                 </button>
               </>
             )
@@ -789,14 +790,14 @@ function QuizAnswer({ code, poll, results, mine, me, clockOffset, send }: { code
   const locked = answered || timeUp || poll.revealed;
   const right = poll.revealed && poll.correct && mine ? poll.correct.length === mine.length && poll.correct.every((c) => mine.includes(c)) : null;
   const submit = (v: ResponseValue | null = draft) => {
-    if (!Array.isArray(v) || !v.length) return toast("Pick an answer first");
+    if (!Array.isArray(v) || !v.length) return toast(t("Pick an answer first"));
     send({ type: "respond", pollId: poll.id, value: v });
   };
 
   return (
     <div class="poll-card">
       <div class="spread">
-        <span class="tag live">Quiz</span>
+        <span class="tag live">{t("Quiz")}</span>
         {!poll.revealed && <Countdown poll={poll} clockOffset={clockOffset} />}
       </div>
       <h2>{poll.title}</h2>
@@ -804,12 +805,12 @@ function QuizAnswer({ code, poll, results, mine, me, clockOffset, send }: { code
         <div class="stack">
           <Confetti fire={right ? poll.id : null} />
           <div class={`verdict ${right ? "right" : "wrong"}`}>
-            <span class="big">{right ? "Correct!" : mine ? "Not this time" : "No answer"}</span>
-            {right && me.quiz?.last ? <span class="num">+{me.quiz.last} points</span> : null}
+            <span class="big">{right ? t("Correct!") : mine ? t("Not this time") : t("No answer")}</span>
+            {right && me.quiz?.last ? <span class="num">+{plural(me.quiz.last, "point")}</span> : null}
           </div>
           {me.quiz && (
             <p class="muted">
-              You're <b>#{me.quiz.rank}</b> of {me.quiz.players} with {me.quiz.points.toLocaleString()} points.
+              {tj("You're {rank} of {players} with {points}.", { rank: <b>#{me.quiz.rank}</b>, players: me.quiz.players.toLocaleString(lang), points: plural(me.quiz.points, "point") })}
             </p>
           )}
           <ResultsView poll={poll} results={results} code={code} />
@@ -820,11 +821,11 @@ function QuizAnswer({ code, poll, results, mine, me, clockOffset, send }: { code
           <ItemInput item={poll as unknown as Item} code={code} value={draft} onChange={setDraft} tiles disabled={locked} onPick={!poll.multi ? (v) => submit(v) : undefined} />
           {poll.multi && !locked && (
             <button class="btn accent block" style={{ marginTop: 12 }} onClick={() => submit()}>
-              Lock in answer
+              {t("Lock in answer")}
             </button>
           )}
           <p class="muted" style={{ marginTop: 14, textAlign: "center" }}>
-            {answered ? "Answer locked in. Wait for the reveal…" : timeUp ? "Time's up! Wait for the reveal…" : "Faster correct answers score more points."}
+            {answered ? t("Answer locked in. Wait for the reveal…") : timeUp ? t("Time's up! Wait for the reveal…") : t("Faster correct answers score more points.")}
           </p>
         </>
       )}
@@ -840,16 +841,16 @@ function Nickname({ send }: { send: Send }) {
       class="nickname"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!v.trim()) return toast("Type a name");
+        if (!v.trim()) return toast(t("Type a name"));
         store.set("rs.name", v.trim());
         send({ type: "join", name: v.trim() });
       }}
     >
       <label class="small grow" for="nick" style={{ flexBasis: "100%" }}>
-        Your name on the leaderboard
+        {t("Your name on the leaderboard")}
       </label>
       <input id="nick" class="input" maxLength={40} value={v} onInput={(e) => setV(e.currentTarget.value)} />
-      <button class="btn sm">Save</button>
+      <button class="btn sm">{t("Save")}</button>
     </form>
   );
 }
@@ -863,7 +864,7 @@ function SurveyAnswer({ code, poll, results, mine, send }: { code: string; poll:
 
   const finish = () => {
     const wire = poll.items.map((it, i) => toWire(it, answers[i]));
-    if (wire.every((x) => x === null)) return toast("Answer at least one question");
+    if (wire.every((x) => x === null)) return toast(t("Answer at least one question"));
     send({ type: "respond", pollId: poll.id, value: wire as ResponseValue });
     setEditing(false);
   };
@@ -871,10 +872,10 @@ function SurveyAnswer({ code, poll, results, mine, send }: { code: string; poll:
   if (!editing && mine)
     return (
       <div class="poll-card stack">
-        <span class="tag live">Survey</span>
-        <h2>Thanks for your answers!</h2>
+        <span class="tag live">{t("Survey")}</span>
+        <h2>{t("Thanks for your answers!")}</h2>
         <button class="btn ghost" onClick={() => (setStep(0), setEditing(true))}>
-          Change my answers
+          {t("Change my answers")}
         </button>
         <ResultsView poll={poll} results={results} code={code} />
       </div>
@@ -883,9 +884,9 @@ function SurveyAnswer({ code, poll, results, mine, send }: { code: string; poll:
   return (
     <div class="poll-card">
       <div class="spread">
-        <span class="tag live">Survey</span>
+        <span class="tag live">{t("Survey")}</span>
         <span class="muted small num">
-          Question {step + 1} of {n}
+          {t("Question {n} of {total}", { n: step + 1, total: n })}
         </span>
       </div>
       <div class="survey-progress" style={{ marginTop: 12 }} aria-hidden="true">
@@ -900,15 +901,15 @@ function SurveyAnswer({ code, poll, results, mine, send }: { code: string; poll:
       <ItemInput key={step} item={item} code={code} value={answers[step]} onChange={(v) => setAnswers(answers.map((a, i) => (i === step ? v : a)))} />
       <div class="spread" style={{ marginTop: 18 }}>
         <button class="btn ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>
-          Back
+          {t("Back")}
         </button>
         {step < n - 1 ? (
           <button class="btn" onClick={() => setStep(step + 1)}>
-            {ready(item, answers[step]) ? "Next" : "Skip"}
+            {ready(item, answers[step]) ? t("Next") : t("Skip")}
           </button>
         ) : (
           <button class="btn accent" onClick={finish}>
-            Submit
+            {t("Submit")}
           </button>
         )}
       </div>
@@ -927,21 +928,21 @@ function BoardTab({ s, me }: { s: NonNullable<ReturnType<typeof useRoom>["state"
         <div class="me-score">
           <div>
             <div class="big num">#{me.quiz.rank}</div>
-            <div class="small">of {me.quiz.players}</div>
+            <div class="small">{t("of {players}", { players: me.quiz.players })}</div>
           </div>
           <div>
-            <b class="num">{me.quiz.points.toLocaleString()} points</b>
-            {beat !== null && beat > 0 && <div class="small">You're ahead of {beat}% of players</div>}
+            <b class="num">{plural(me.quiz.points, "point")}</b>
+            {beat !== null && beat > 0 && <div class="small">{t("You're ahead of {percent}% of players", { percent: beat })}</div>}
           </div>
         </div>
       ) : (
         <div class="poll-card">
-          <Empty title="Not on the board yet">Answer a quiz question to get points.</Empty>
+          <Empty title={t("Not on the board yet")}>{t("Answer a quiz question to get points.")}</Empty>
         </div>
       )}
       <div class="poll-card stack">
-        <h2>Leaderboard</h2>
-        <p class="muted small">{plural(lb.rounds, "question")} revealed so far.</p>
+        <h2>{t("Leaderboard")}</h2>
+        <p class="muted small">{t("{questions} revealed so far.", { questions: plural(lb.rounds, "question") })}</p>
         <Podium board={lb} />
         <Board board={lb} from={3} />
       </div>

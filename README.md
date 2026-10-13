@@ -24,6 +24,7 @@
 - Quiz mode with a countdown, points for speed and a live leaderboard
 - Send emoji reactions that float up the big screen
 - Works in light and dark mode, sized for one-handed phone use
+- **English, French and Spanish**: the app follows each phone's language, with a menu to switch
 
 **Hosts** — `/host/CODE#hostkey` (private link, given when you create an event)
 - Q&A moderation: review first, show on screen, mark answered, archive, delete, reply, label, move between rooms
@@ -150,7 +151,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for a deeper tour.
 See the full product plan in **[docs/ROADMAP.md](docs/ROADMAP.md)** — Slido Pro feature parity, design direction, architecture and release phases.
 
 Done: Slido Pro-level Q&A, polls, quizzes, moderation, analytics and exports (v0.1–v0.3), plus repeat-question merging, phone remote, stream overlay and website embed (v0.4), and paste-to-polls and recap pages (v0.5).
-Next up: host accounts, public API and webhooks, translations, team quizzes.
+Next up: team quizzes, public API and webhooks, host accounts.
 
 Contributions welcome — read [CONTRIBUTING.md](CONTRIBUTING.md), pick any unchecked item and open an issue.
 

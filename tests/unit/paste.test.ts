@@ -93,3 +93,14 @@ Quiz without an answer (quiz)
     expect(parsePolls("Yes or no?\r\n- Yes\r\n- No").polls[0].options).toEqual(["Yes", "No"]);
   });
 });
+
+describe("paste to polls in French and Spanish", () => {
+  it("understands translated type hints and answer marks", () => {
+    const fr = parsePolls(`Notre feuille de route est-elle claire ? (note)\n\nUn mot pour ce trimestre (nuage de mots)\n\nClassez ces priorités (classement)\n- Vitesse\n- Qualité\n\nCombien font 2 + 2 ?\n- 3\n- 4 (bonne réponse)`);
+    expect(fr.polls.map((p) => p.type)).toEqual(["rating", "wordcloud", "ranking", "quiz"]);
+    expect(fr.polls[3].correct).toEqual([1]);
+    const es = parsePolls(`¿Qué tan clara es la hoja de ruta? (valoración)\n\nDel 1 al 10 (escala)\n\nElige varias (varias)\n- A\n- B`);
+    expect(es.polls.map((p) => p.type)).toEqual(["rating", "scale", "multiple"]);
+    expect(es.polls[2].multi).toBe(true);
+  });
+});

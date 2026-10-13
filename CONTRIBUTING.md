@@ -48,6 +48,14 @@ tests/e2e/      End-to-end and load tests against a running server
 
 Keep this model when adding features: store in SQLite, mark dirty, let `flush()` send.
 
+## Translations
+
+All text people see goes through `t("English text")` (or `tj()` when part of the sentence is an element, and `plural(n, "word")` for counts). English is the key, so code stays readable.
+
+- **Adding text:** wrap it in `t()`, then add the French and Spanish versions to `src/web/i18n/fr.ts` and `es.ts`. `npx tsx scripts/i18n-keys.ts --list` shows what's missing; `npm test` fails until every language is complete.
+- **Same English, different meaning:** add a note after `||`, e.g. `t("Answered||tab")`. English shows "Answered"; translators get a separate key.
+- **Adding a language:** copy `es.ts`, translate the values, add the code to `LANGS` in `src/web/lib/i18n.ts` and a loader in `src/web/main.tsx`.
+
 ## Before you open a pull request
 
 ```bash

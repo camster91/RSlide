@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Analytics as Data } from "../../shared/protocol";
 import { CFG, plural, useTheme, useTitle } from "../lib/util";
 import { Brand, Empty, Message, TYPE_LABEL } from "../components/ui";
+import { t, pluralWord, lang } from "../lib/i18n";
 
 type Bucket = Data["timeline"][number];
 
@@ -28,13 +29,13 @@ function buckets(timeline: Bucket[]): { size: number; rows: Bucket[] } {
   return { size, rows };
 }
 const total = (b: Bucket) => b.joins + b.questions + b.votes + b.answers + b.reactions;
-const time = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const time = (t: number) => new Date(t).toLocaleTimeString(lang, { hour: "numeric", minute: "2-digit" });
 
 function ActivityChart({ timeline }: { timeline: Bucket[] }) {
   const { size, rows } = useMemo(() => buckets(timeline), [timeline]);
   const [hover, setHover] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
-  if (!rows.length) return <Empty>Activity shows here once people join.</Empty>;
+  if (!rows.length) return <Empty>{t("Activity shows here once people join.")}</Empty>;
   const W = 720;
   const H = 220;
   const padL = 36;
@@ -50,12 +51,12 @@ function ActivityChart({ timeline }: { timeline: Bucket[] }) {
   const h = hover !== null ? rows[hover] : null;
   return (
     <div class="chart" ref={box} onMouseLeave={() => setHover(null)}>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Actions per ${size === 1 ? "minute" : `${size} minutes`}`}>
-        {ticks.map((t) => (
-          <g key={t}>
-            <line class="gridline" x1={padL} x2={W} y1={y(t)} y2={y(t)} />
-            <text class="axis-text" x={padL - 6} y={y(t) + 4} text-anchor="end">
-              {Math.round(t)}
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={size === 1 ? t("Actions per minute") : t("Actions per {n} minutes", { n: size })}>
+        {ticks.map((v) => (
+          <g key={v}>
+            <line class="gridline" x1={padL} x2={W} y1={y(v)} y2={y(v)} />
+            <text class="axis-text" x={padL - 6} y={y(v) + 4} text-anchor="end">
+              {Math.round(v).toLocaleString(lang)}
             </text>
           </g>
         ))}
@@ -85,30 +86,30 @@ function ActivityChart({ timeline }: { timeline: Bucket[] }) {
           <br />
           {(
             [
-              ["joined", h.joins],
-              ["question", h.questions],
-              ["vote", h.votes],
-              ["answer", h.answers],
-              ["reaction", h.reactions],
-            ] as [string, number][]
+              ["joined", h.joins, t("{n} joined", { n: h.joins })],
+              ["question", h.questions, plural(h.questions, "question")],
+              ["vote", h.votes, plural(h.votes, "vote")],
+              ["answer", h.answers, plural(h.answers, "answer")],
+              ["reaction", h.reactions, plural(h.reactions, "reaction")],
+            ] as [string, number, string][]
           )
             .filter(([, n]) => n)
-            .map(([l, n]) => (
-              <div key={l}>{l === "joined" ? `${n} joined` : plural(n, l)}</div>
+            .map(([l, , text]) => (
+              <div key={l}>{text}</div>
             ))}
-          {!total(h) && <div>No activity</div>}
+          {!total(h) && <div>{t("No activity")}</div>}
         </div>
       )}
       <table class="sr-table">
-        <caption>Activity over time</caption>
+        <caption>{t("Activity over time")}</caption>
         <thead>
           <tr>
-            <th>Time</th>
-            <th>Joined</th>
-            <th>Questions</th>
-            <th>Votes</th>
-            <th>Answers</th>
-            <th>Reactions</th>
+            <th>{t("Time")}</th>
+            <th>{t("Joined")}</th>
+            <th>{t("Questions")}</th>
+            <th>{t("Votes")}</th>
+            <th>{t("Answers")}</th>
+            <th>{t("Reactions")}</th>
           </tr>
         </thead>
         <tbody>
@@ -125,7 +126,7 @@ function ActivityChart({ timeline }: { timeline: Bucket[] }) {
         </tbody>
       </table>
       <p class="muted tiny" style={{ marginTop: 6 }}>
-        Everything people did, per {size === 1 ? "minute" : `${size} minutes`}. Hover a bar for the breakdown.
+        {size === 1 ? t("Everything people did, per minute. Hover a bar for the breakdown.") : t("Everything people did, per {n} minutes. Hover a bar for the breakdown.", { n: size })}
       </p>
     </div>
   );
@@ -151,7 +152,7 @@ function HBar({ label, value, pct, note }: { label: string; value: string; pct: 
 export function Analytics({ code }: { code: string }) {
   const key = decodeURIComponent(location.hash.slice(1));
   const [data, setData] = useState<Data | null | "forbidden">(null);
-  useTitle(data && data !== "forbidden" ? `Analytics: ${data.title}` : CFG.name);
+  useTitle(data && data !== "forbidden" ? t("Analytics: {title}", { title: data.title }) : CFG.name);
   useTheme(undefined);
   useEffect(() => {
     let stop = false;
@@ -168,8 +169,8 @@ export function Analytics({ code }: { code: string }) {
     };
   }, [code, key]);
 
-  if (data === "forbidden" || !key) return <Message title="Host link needed">Open analytics from the host console of your event.</Message>;
-  if (!data) return <div class="report muted">Loading…</div>;
+  if (data === "forbidden" || !key) return <Message title={t("Host link needed")}>{t("Open analytics from the host console of your event.")}</Message>;
+  if (!data) return <div class="report muted">{t("Loading…")}</div>;
   const p = Math.max(1, data.participants);
   const answered = data.polls.reduce((n, x) => n + x.responses, 0);
 
@@ -178,82 +179,82 @@ export function Analytics({ code }: { code: string }) {
       <div class="spread" style={{ marginBottom: 24 }}>
         <Brand />
         <a class="btn ghost sm" href={`/host/${code}#${key}`}>
-          Back to host console
+          {t("Back to host console")}
         </a>
       </div>
-      <p class="muted">Analytics, code {code}. Updates every 30 seconds.</p>
+      <p class="muted">{t("Analytics, code {code}. Updates every 30 seconds.", { code })}</p>
       <h1>{data.title}</h1>
 
       <section class="stats-row" style={{ marginTop: 20 }}>
         <div class="stat">
           <b>{data.participants}</b>
-          <span>people joined</span>
+          <span>{t("people joined")}</span>
         </div>
         <div class="stat">
           <b>{data.peakOnline}</b>
-          <span>most online at once{data.peakAt ? `, at ${time(data.peakAt)}` : ""}</span>
+          <span>{data.peakAt ? t("most online at once, at {time}", { time: time(data.peakAt) }) : t("most online at once")}</span>
         </div>
         <div class="stat">
           <b>{data.questions}</b>
           <span>
-            {data.questions === 1 ? "question" : "questions"} from {plural(data.askers, "person")} ({Math.round((data.askers / p) * 100)}% of people)
+            {t("{questions} from {people} ({pct}% of people)", { questions: pluralWord(data.questions, "question"), people: plural(data.askers, "person"), pct: Math.round((data.askers / p) * 100) })}
           </span>
         </div>
         <div class="stat">
           <b>{answered}</b>
-          <span>poll answers</span>
+          <span>{t("poll answers")}</span>
         </div>
         <div class="stat">
           <b>{data.votes}</b>
-          <span>votes on questions</span>
+          <span>{t("votes on questions")}</span>
         </div>
         <div class="stat">
           <b>{data.reactions}</b>
-          <span>reactions</span>
+          <span>{t("reactions")}</span>
         </div>
       </section>
 
       <section>
-        <h2>Activity over time</h2>
+        <h2>{t("Activity over time")}</h2>
         <div style={{ marginTop: 14 }}>
           <ActivityChart timeline={data.timeline} />
         </div>
       </section>
 
       <section>
-        <h2>Poll response rate</h2>
+        <h2>{t("Poll response rate")}</h2>
         <p class="muted small" style={{ margin: "4px 0 14px" }}>
-          Share of everyone who joined that answered each poll.
+          {t("Share of everyone who joined that answered each poll.")}
         </p>
         {data.polls.length ? (
           data.polls.map((x) => <HBar key={x.id} label={x.title} note={` · ${TYPE_LABEL[x.type]}`} value={`${Math.round((x.responses / p) * 100)}% (${x.responses})`} pct={(x.responses / p) * 100} />)
         ) : (
-          <Empty>No polls have been launched yet.</Empty>
+          <Empty>{t("No polls have been launched yet.")}</Empty>
         )}
       </section>
 
       <section>
-        <h2>Top questions</h2>
+        <h2>{t("Top questions")}</h2>
         {data.topQuestions.length ? (
           <ol style={{ paddingLeft: 22 }}>
             {data.topQuestions.map((q, i) => (
               <li key={i} style={{ margin: "10px 0" }}>
                 {q.text}
                 <div class="muted small">
-                  Score {q.score}
-                  {q.status === "answered" ? ", answered" : ""}
+                  {t("Score {score}", { score: q.score })}
+                  {q.status === "answered" ? t(", answered") : ""}
                 </div>
               </li>
             ))}
           </ol>
         ) : (
-          <Empty>No questions yet.</Empty>
+          <Empty>{t("No questions yet.")}</Empty>
         )}
       </section>
 
       {data.rooms.length > 1 && (
         <section>
-          <h2>Questions by room</h2>
+          <h2>{t("Questions by room")}</h2>
           <div style={{ marginTop: 14 }}>
             {data.rooms.map((r) => (
               <HBar key={r.name} label={r.name} value={String(r.questions)} pct={(r.questions / Math.max(1, data.questions)) * 100} />

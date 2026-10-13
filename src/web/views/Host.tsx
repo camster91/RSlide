@@ -23,35 +23,36 @@ import { TEMPLATES } from "../../shared/templates";
 import { parsePolls, type PasteResult } from "../../shared/paste";
 import { useRoom, type Send } from "../lib/room";
 import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, store, toast, uploadImage, useTheme, useTitle } from "../lib/util";
+import { t, tj } from "../lib/i18n";
 import { Board, ConnProblem, Countdown, Empty, Icon, LabelChip, Podium, QrCode, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
 
 type QTab = "live" | "pending" | "answered" | "archived";
 const Q_TABS: [QTab, string][] = [
-  ["live", "Live"],
-  ["pending", "To review"],
-  ["answered", "Answered"],
-  ["archived", "Archived"],
+  ["live", t("Live")],
+  ["pending", t("To review")],
+  ["answered", t("Answered||tab")],
+  ["archived", t("Archived||tab")],
 ];
 const EMPTY_TEXT: Record<QTab, [string, string]> = {
-  live: ["No questions yet", "Share the code so people can start asking."],
-  pending: ["Nothing to review", "New questions wait here until you approve them."],
-  answered: ["Nothing answered yet", "Mark questions answered as you go."],
-  archived: ["Nothing archived", "Archive questions to hide them from everyone."],
+  live: [t("No questions yet"), t("Share the code so people can start asking.")],
+  pending: [t("Nothing to review"), t("New questions wait here until you approve them.")],
+  answered: [t("Nothing answered yet"), t("Mark questions answered as you go.")],
+  archived: [t("Nothing archived"), t("Archive questions to hide them from everyone.")],
 };
 const THEME_SWATCH: Record<ThemeName, [string, string, string]> = {
-  indigo: ["#3b3fd8", "#ffb21a", "Indigo"],
-  ocean: ["#0b6e99", "#ff9f1c", "Ocean"],
-  forest: ["#1f7a4d", "#e9b949", "Forest"],
-  berry: ["#b1245f", "#ffb21a", "Berry"],
-  mono: ["#24242e", "#ffd400", "Mono"],
-  contrast: ["#0000b3", "#ffe600", "High contrast"],
+  indigo: ["#3b3fd8", "#ffb21a", t("Indigo")],
+  ocean: ["#0b6e99", "#ff9f1c", t("Ocean")],
+  forest: ["#1f7a4d", "#e9b949", t("Forest")],
+  berry: ["#b1245f", "#ffb21a", t("Berry")],
+  mono: ["#24242e", "#ffd400", t("Mono")],
+  contrast: ["#0000b3", "#ffe600", t("High contrast")],
 };
 type ModAction = "approve" | "answer" | "archive" | "highlight" | "deleteQuestion";
 
 const copy = (txt: string, msg: string) =>
   navigator.clipboard?.writeText(txt).then(
     () => toast(msg),
-    () => prompt("Copy this link:", txt),
+    () => prompt(t("Copy this link:"), txt),
   );
 
 /** The host console. With `moderator`, only the Q&A tools are shown. */
@@ -72,7 +73,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   const [recap, setRecap] = useState(false);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const s = state.snapshot;
-  useTitle(s ? `${moderator ? "Moderate" : "Host"}: ${s.meta.title}` : CFG.name);
+  useTitle(s ? (moderator ? t("Moderate: {title}", { title: s.meta.title }) : t("Host: {title}", { title: s.meta.title })) : CFG.name);
   useTheme(s?.meta.settings.theme);
   useEffect(() => {
     if (s && !moderator) rememberHosted({ code, key, title: s.meta.title, ts: Date.now() });
@@ -92,7 +93,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   const list = sortQuestions(by[tab], "popular");
   const byId = new Map((s?.questions ?? []).map((q) => [q.id, q]));
   const act = (type: ModAction, id: string) => {
-    if (type === "deleteQuestion" && !confirm("Delete this question for everyone?")) return;
+    if (type === "deleteQuestion" && !confirm(t("Delete this question for everyone?"))) return;
     send({ type, id });
   };
   const settings = meta?.settings;
@@ -100,20 +101,20 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   const qaPanel = (
     <section class="panel stack">
       <div class="section-title">
-        <h2>Q&amp;A</h2>
+        <h2>{t("Q&A")}</h2>
         {settings && !moderator && (
           <label class="check small">
             <input type="checkbox" checked={settings.qaOpen} onChange={(e) => send({ type: "setSettings", settings: { qaOpen: e.currentTarget.checked } })} />
-            Taking questions
+            {t("Taking questions")}
           </label>
         )}
       </div>
-      {settings?.qaOpensAt && !settings.qaOpen && <p class="notice">Opens by itself at {whenText(settings.qaOpensAt)}.</p>}
-      {settings?.qaClosesAt && settings.qaOpen && <p class="notice">Closes by itself at {whenText(settings.qaClosesAt)}.</p>}
+      {settings?.qaOpensAt && !settings.qaOpen && <p class="notice">{t("Opens by itself at {time}.", { time: whenText(settings.qaOpensAt) })}</p>}
+      {settings?.qaClosesAt && settings.qaOpen && <p class="notice">{t("Closes by itself at {time}.", { time: whenText(settings.qaClosesAt) })}</p>}
       {rooms.length > 1 && (
-        <div class="room-tabs" role="group" aria-label="Filter by room">
+        <div class="room-tabs" role="group" aria-label={t("Filter by room")}>
           <button aria-pressed={roomFilter === "all"} onClick={() => setRoomFilter("all")}>
-            All rooms
+            {t("All rooms")}
           </button>
           {rooms.map((r) => (
             <button key={r.id} aria-pressed={roomFilter === r.id} onClick={() => setRoomFilter(r.id)}>
@@ -123,8 +124,8 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
         </div>
       )}
       {labels.length > 0 && (
-        <div class="filters" role="group" aria-label="Filter by label">
-          <span class="muted small">Label:</span>
+        <div class="filters" role="group" aria-label={t("Filter by label")}>
+          <span class="muted small">{t("Label:")}</span>
           {labels.map((l) => (
             <LabelChip key={l.id} label={l} on={labelFilter === l.id ? true : labelFilter ? false : undefined} onClick={() => setLabelFilter(labelFilter === l.id ? null : l.id)} />
           ))}
@@ -145,7 +146,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
           ))}
         </div>
       ) : (
-        <Empty title={s ? EMPTY_TEXT[tab][0] : "Connecting…"}>{s ? EMPTY_TEXT[tab][1] : null}</Empty>
+        <Empty title={s ? EMPTY_TEXT[tab][0] : t("Connecting…")}>{s ? EMPTY_TEXT[tab][1] : null}</Empty>
       )}
     </section>
   );
@@ -153,14 +154,14 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   if (moderator)
     return (
       <>
-        <TopBar title={s ? `Moderating: ${s.meta.title}` : "Connecting…"} logo={settings?.logo} code={code}>
+        <TopBar title={s ? t("Moderating: {title}", { title: s.meta.title }) : t("Connecting…")} logo={settings?.logo} code={code}>
           <span class="chip">
             <span class={`dot ${status === "online" ? "" : "off"}`} />
-            <span class="num">{s?.online ?? 0}</span> online
+            {tj("{n} online", { n: <span class="num">{s?.online ?? 0}</span> })}
           </span>
         </TopBar>
         <main class="wrap stack" style={{ maxWidth: 820 }}>
-          <p class="muted small">You're a moderator. You can approve, label, reply to and highlight questions.</p>
+          <p class="muted small">{t("You're a moderator. You can approve, label, reply to and highlight questions.")}</p>
           {qaPanel}
         </main>
       </>
@@ -169,19 +170,19 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   return (
     <>
       <TopBar title={s?.meta.title} logo={settings?.logo} code={code}>
-        <span class="chip" title="Attendees connected now">
+        <span class="chip" title={t("Attendees connected now")}>
           <span class={`dot ${status === "online" ? "" : "off"}`} />
-          <span class="num">{s?.online ?? 0}</span> online
+          {tj("{n} online", { n: <span class="num">{s?.online ?? 0}</span> })}
         </span>
         <ExportMenu code={code} hostKey={key} onRecap={() => setRecap(true)} />
-        <button class="btn sm ghost" onClick={() => setDrawer(true)} aria-label="Event settings">
-          <Icon.gear /> Settings
+        <button class="btn sm ghost" onClick={() => setDrawer(true)} aria-label={t("Event settings")}>
+          <Icon.gear /> {t("Settings")}
         </button>
-        <button class="btn sm ghost" onClick={() => setRemote(true)} title="Control polls and questions from your phone">
-          <Icon.phone /> Remote
+        <button class="btn sm ghost" onClick={() => setRemote(true)} title={t("Control polls and questions from your phone")}>
+          <Icon.phone /> {t("Remote")}
         </button>
         <a class="btn sm accent" href={`/present/${code}#${key}`} target="_blank" rel="noopener">
-          Open big screen
+          {t("Open big screen")}
         </a>
       </TopBar>
 
@@ -189,7 +190,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
         <input
           class="title-input"
           maxLength={120}
-          aria-label="Event name"
+          aria-label={t("Event name")}
           value={titleDraft ?? s?.meta.title ?? ""}
           onInput={(e) => setTitleDraft(e.currentTarget.value)}
           onBlur={() => {
@@ -201,20 +202,20 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
 
         <div class="join-strip">
           <span>
-            Join at <b>{location.host}</b> with code
+            {tj("Join at {host} with code", { host: <b>{location.host}</b> })}
           </span>
           <span class="code">{code}</span>
           {meta?.passcode && (
             <span class="chip" style={{ background: "rgba(255,255,255,.18)", color: "inherit" }}>
-              Passcode: {meta.passcode}
+              {t("Passcode: {passcode}", { passcode: meta.passcode })}
             </span>
           )}
           <span class="grow" />
-          <button class="btn sm ghost" onClick={() => copy(joinUrl(code), "Join link copied")}>
-            Copy join link
+          <button class="btn sm ghost" onClick={() => copy(joinUrl(code), t("Join link copied"))}>
+            {t("Copy join link")}
           </button>
-          <button class="btn sm ghost" onClick={() => copy(location.href, "Host link copied. Keep it private.")}>
-            Copy host link
+          <button class="btn sm ghost" onClick={() => copy(location.href, t("Host link copied. Keep it private."))}>
+            {t("Copy host link")}
           </button>
         </div>
 
@@ -224,15 +225,15 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
           <section class="stack">
             <div class="panel stack">
               <div class="section-title">
-                <h2>Polls</h2>
-                <button class="btn sm ghost" onClick={() => setTemplates("paste")} title="Paste a list of questions and turn them into polls">
-                  Paste
+                <h2>{t("Polls")}</h2>
+                <button class="btn sm ghost" onClick={() => setTemplates("paste")} title={t("Paste a list of questions and turn them into polls")}>
+                  {t("Paste")}
                 </button>
                 <button class="btn sm ghost" onClick={() => setTemplates("templates")}>
-                  Templates
+                  {t("Templates")}
                 </button>
                 <button class="btn sm" onClick={() => setEditing(newDraft("multiple"))}>
-                  New poll
+                  {t("New poll")}
                 </button>
               </div>
               {editing && (
@@ -266,16 +267,19 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
                 </div>
               ) : (
                 !editing && (
-                  <Empty title="No polls yet">
-                    Make a few before you start, or{" "}
-                    <button class="link-btn" onClick={() => setTemplates("templates")}>
-                      start from a template
-                    </button>{" "}
-                    or{" "}
-                    <button class="link-btn" onClick={() => setTemplates("paste")}>
-                      paste your questions
-                    </button>
-                    .
+                  <Empty title={t("No polls yet")}>
+                    {tj("Make a few before you start, or {template} or {paste}.", {
+                      template: (
+                        <button class="link-btn" onClick={() => setTemplates("templates")}>
+                          {t("start from a template")}
+                        </button>
+                      ),
+                      paste: (
+                        <button class="link-btn" onClick={() => setTemplates("paste")}>
+                          {t("paste your questions")}
+                        </button>
+                      ),
+                    })}
                   </Empty>
                 )
               )}
@@ -284,12 +288,12 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
             {s && s.leaderboard.rounds > 0 && (
               <div class="panel stack">
                 <div class="section-title">
-                  <h2>Quiz leaderboard</h2>
+                  <h2>{t("Quiz leaderboard")}</h2>
                   <button
                     class={`btn sm ${s.meta.presentMode === "leaderboard" ? "on" : "ghost"}`}
                     onClick={() => send({ type: "setPresentMode", mode: s.meta.presentMode === "leaderboard" ? "auto" : "leaderboard" })}
                   >
-                    {s.meta.presentMode === "leaderboard" ? "On big screen" : "Show on big screen"}
+                    {s.meta.presentMode === "leaderboard" ? t("On big screen") : t("Show on big screen")}
                   </button>
                 </div>
                 <Podium board={s.leaderboard} />
@@ -299,7 +303,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
 
             {settings?.reactions && (
               <p class="muted small" style={{ textAlign: "center" }}>
-                {reactions ? `${reactions.toLocaleString()} reactions since you opened this page` : "Reactions are on. They float up the big screen."}
+                {reactions ? t("{reactions} since you opened this page", { reactions: plural(reactions, "reaction") }) : t("Reactions are on. They float up the big screen.")}
               </p>
             )}
           </section>
@@ -319,7 +323,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
           onPick={(polls) => {
             send({ type: "importPolls", polls });
             setTemplates(false);
-            toast(polls.length === 1 ? "Added 1 poll" : `Added ${polls.length} polls`);
+            toast(polls.length === 1 ? t("Added 1 poll") : t("Added {n} polls", { n: polls.length }));
           }}
         />
       )}
@@ -348,10 +352,10 @@ function ExportMenu({ code, hostKey, onRecap }: { code: string; hostKey: string;
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       rememberHosted({ code: d.code, key: d.hostKey, title: d.title, ts: Date.now() });
-      toast("Copy made. You're now in the new event.");
+      toast(t("Copy made. You're now in the new event."));
       navigate(`/host/${d.code}#${d.hostKey}`);
     } catch (e) {
-      toast((e as Error).message || "Couldn't copy the event");
+      toast((e as Error).message || t("Couldn't copy the event"));
     }
     setBusy(false);
     setOpen(false);
@@ -359,12 +363,12 @@ function ExportMenu({ code, hostKey, onRecap }: { code: string; hostKey: string;
   return (
     <div class="menu" ref={ref}>
       <button class="btn sm ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
-        Results
+        {t("Results")}
       </button>
       {open && (
         <div class="menu-list" role="menu">
           <a role="menuitem" href={`/analytics/${code}#${hostKey}`} target="_blank" rel="noopener">
-            Analytics
+            {t("Analytics")}
           </a>
           <button
             role="menuitem"
@@ -373,19 +377,19 @@ function ExportMenu({ code, hostKey, onRecap }: { code: string; hostKey: string;
               onRecap();
             }}
           >
-            Recap page to share with attendees
+            {t("Recap page to share with attendees")}
           </button>
           <a role="menuitem" href={`/report/${code}#${hostKey}`} target="_blank" rel="noopener">
-            Report to print or save as PDF
+            {t("Report to print or save as PDF")}
           </a>
           <a role="menuitem" href={`/api/events/${code}/export?format=xlsx&key=${k}`} download>
-            Download Excel (.xlsx)
+            {t("Download Excel (.xlsx)")}
           </a>
           <a role="menuitem" href={`/api/events/${code}/export?key=${k}`} download>
-            Download CSV
+            {t("Download CSV")}
           </a>
           <button role="menuitem" onClick={duplicate} disabled={busy}>
-            {busy ? "Copying…" : "Copy this event (polls and settings)"}
+            {busy ? t("Copying…") : t("Copy this event (polls and settings)")}
           </button>
         </div>
       )}
@@ -412,68 +416,68 @@ function RecapModal({ code, hostKey, meta, send, onClose }: { code: string; host
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       setSummary(d.summary);
-      toast("Draft written. Check it, then save.");
+      toast(t("Draft written. Check it, then save."));
     } catch (e) {
-      toast((e as Error).message || "The AI didn't answer. Try again.");
+      toast((e as Error).message || t("The AI didn't answer. Try again."));
     }
     setBusy(false);
   };
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
-      <div class="modal recap-modal" role="dialog" aria-modal="true" aria-label="Recap page">
+      <div class="modal recap-modal" role="dialog" aria-modal="true" aria-label={t("Recap page")}>
         <div class="spread">
-          <h2>Recap page</h2>
-          <button class="btn sm quiet" onClick={onClose} aria-label="Close">
+          <h2>{t("Recap page")}</h2>
+          <button class="btn sm quiet" onClick={onClose} aria-label={t("Close")}>
             <Icon.x />
           </button>
         </div>
         <p class="muted small">
-          A page attendees can open after the event: your summary, the top questions with your replies, and poll results they could already see. Pending and archived questions are left out.
+          {t("A page attendees can open after the event: your summary, the top questions with your replies, and poll results they could already see. Pending and archived questions are left out.")}
         </p>
         <label class="toggle">
           <span>
-            Share the recap
+            {t("Share the recap")}
             <span class="muted small" style={{ display: "block" }}>
-              Anyone with the link can see it. Attendees also get a link in the event.
+              {t("Anyone with the link can see it. Attendees also get a link in the event.")}
             </span>
           </span>
           <input type="checkbox" checked={meta.recapPublic} onChange={(e) => send({ type: "setRecap", public: e.currentTarget.checked })} />
         </label>
         {meta.recapPublic && (
           <div class="mod-link">
-            <input class="input" readOnly value={url} aria-label="Recap link" onFocus={(e) => e.currentTarget.select()} />
-            <button class="btn sm" onClick={() => copy(url, "Recap link copied")}>
-              Copy
+            <input class="input" readOnly value={url} aria-label={t("Recap link")} onFocus={(e) => e.currentTarget.select()} />
+            <button class="btn sm" onClick={() => copy(url, t("Recap link copied"))}>
+              {t("Copy")}
             </button>
             <a class="btn sm ghost" href={url} target="_blank" rel="noopener">
-              Open
+              {t("Open")}
             </a>
           </div>
         )}
         <label class="label" for="recap-summary">
-          Summary
+          {t("Summary")}
         </label>
         <textarea
           id="recap-summary"
           class="input"
           rows={7}
           maxLength={2000}
-          placeholder="A few lines about what came up. Leave empty to skip it."
+          placeholder={t("A few lines about what came up. Leave empty to skip it.")}
           value={summary}
           onInput={(e) => setSummary(e.currentTarget.value)}
         />
         <div class="row">
           <button class="btn sm" disabled={saved} onClick={() => send({ type: "setRecap", summary })}>
-            {saved ? "Saved" : "Save summary"}
+            {saved ? t("Saved") : t("Save summary")}
           </button>
           {meta.ai && (
-            <button class="btn sm ghost" disabled={busy} onClick={write} title="Uses Workers AI on your Cloudflare account">
-              {busy ? "Writing…" : summary ? "Rewrite with AI" : "Write it with AI"}
+            <button class="btn sm ghost" disabled={busy} onClick={write} title={t("Uses Workers AI on your Cloudflare account")}>
+              {busy ? t("Writing…") : summary ? t("Rewrite with AI") : t("Write it with AI")}
             </button>
           )}
         </div>
-        {meta.ai && <p class="muted tiny">AI drafts are never shared until you save them.</p>}
+        {meta.ai && <p class="muted tiny">{t("AI drafts are never shared until you save them.")}</p>}
       </div>
     </>
   );
@@ -491,24 +495,24 @@ function RemoteModal({ code, hostKey, onClose }: { code: string; hostKey: string
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
-      <div class="modal remote-modal" role="dialog" aria-modal="true" aria-label="Phone remote">
+      <div class="modal remote-modal" role="dialog" aria-modal="true" aria-label={t("Phone remote")}>
         <div class="spread">
-          <h2>Control from your phone</h2>
-          <button class="btn sm quiet" onClick={onClose} aria-label="Close">
+          <h2>{t("Control from your phone")}</h2>
+          <button class="btn sm quiet" onClick={onClose} aria-label={t("Close")}>
             <Icon.x />
           </button>
         </div>
-        <p class="muted small">Scan with your phone camera. Move through polls, show results and put questions on the big screen while you're on stage.</p>
+        <p class="muted small">{t("Scan with your phone camera. Move through polls, show results and put questions on the big screen while you're on stage.")}</p>
         <QrCode url={url} />
         <div class="row">
-          <button class="btn sm" onClick={() => copy(url, "Remote link copied. Keep it private.")}>
-            Copy remote link
+          <button class="btn sm" onClick={() => copy(url, t("Remote link copied. Keep it private."))}>
+            {t("Copy remote link")}
           </button>
           <a class="btn sm ghost" href={url} target="_blank" rel="noopener">
-            Open here
+            {t("Open here")}
           </a>
         </div>
-        <p class="notice small">This link has full host control. Only share it with people you trust.</p>
+        <p class="notice small">{t("This link has full host control. Only share it with people you trust.")}</p>
       </div>
     </>
   );
@@ -518,18 +522,7 @@ function RemoteModal({ code, hostKey, onClose }: { code: string; hostKey: string
 
 type AddTab = "templates" | "paste";
 
-const PASTE_EXAMPLE = `Which launch excites you most?
-- New dashboard
-- Mobile app
-- AI assistant
-
-What is 2 + 2?
-- 3
-- 4 *
-
-How clear is our roadmap? (rating)
-
-One word for this quarter`;
+const PASTE_EXAMPLE = t("Which launch excites you most?\n- New dashboard\n- Mobile app\n- AI assistant\n\nWhat is 2 + 2?\n- 3\n- 4 *\n\nHow clear is our roadmap? (rating)\n\nOne word for this quarter");
 
 function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
   tab: AddTab;
@@ -563,31 +556,31 @@ function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
       if (!r.ok) throw new Error(d.error);
       setAiResult(d as PasteResult);
     } catch (e) {
-      toast((e as Error).message || "The AI didn't answer. Try again.");
+      toast((e as Error).message || t("The AI didn't answer. Try again."));
     }
     setBusy(false);
   };
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
-      <div class="modal" role="dialog" aria-modal="true" aria-label="Add polls">
+      <div class="modal" role="dialog" aria-modal="true" aria-label={t("Add polls")}>
         <div class="spread">
-          <h2>Add polls</h2>
-          <button class="btn sm quiet" onClick={onClose} aria-label="Close">
+          <h2>{t("Add polls")}</h2>
+          <button class="btn sm quiet" onClick={onClose} aria-label={t("Close")}>
             <Icon.x />
           </button>
         </div>
         <div class="tabs" role="tablist" style={{ marginTop: 12 }}>
           <button class="tab" role="tab" aria-selected={tab === "paste"} onClick={() => setTab("paste")}>
-            Paste your questions
+            {t("Paste your questions")}
           </button>
           <button class="tab" role="tab" aria-selected={tab === "templates"} onClick={() => setTab("templates")}>
-            Templates
+            {t("Templates")}
           </button>
         </div>
         {tab === "templates" ? (
           <>
-            <p class="muted small" style={{ marginTop: 12 }}>The polls are added to the end of your list. You can edit them before you launch.</p>
+            <p class="muted small" style={{ marginTop: 12 }}>{t("The polls are added to the end of your list. You can edit them before you launch.")}</p>
             <div class="tpl-grid">
               {TEMPLATES.map((t) => (
                 <button key={t.id} class="tpl" onClick={() => onPick(t.polls)}>
@@ -602,7 +595,7 @@ function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
           <div class="paste">
             <div class="stack-sm">
               <label class="label" for="paste" style={{ marginTop: 12 }}>
-                One question per block. Put options on the lines below, and a <b>*</b> after the right answer for a quiz.
+                {tj("One question per block. Put options on the lines below, and a {star} after the right answer for a quiz.", { star: <b>*</b> })}
               </label>
               <textarea
                 id="paste"
@@ -615,17 +608,17 @@ function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
                 }}
               />
               <p class="muted tiny">
-                Hints in brackets set the type: (rating), (scale), (word cloud), (open), (ranking), (pick several).
+                {t("Hints in brackets set the type: (rating), (scale), (word cloud), (open), (ranking), (pick several).")}
               </p>
               {ai && (
-                <button class="btn sm ghost" disabled={busy || text.trim().length < 10} onClick={askAi} title="Uses Workers AI on your Cloudflare account">
-                  {busy ? "Thinking…" : "Messy notes? Let AI write the polls"}
+                <button class="btn sm ghost" disabled={busy || text.trim().length < 10} onClick={askAi} title={t("Uses Workers AI on your Cloudflare account")}>
+                  {busy ? t("Thinking…") : t("Messy notes? Let AI write the polls")}
                 </button>
               )}
             </div>
             <div class="paste-preview" aria-live="polite">
               <p class="label" style={{ marginTop: 12 }}>
-                {aiResult ? "AI suggestions" : "Preview"}
+                {aiResult ? t("AI suggestions") : t("Preview")}
                 {result.polls.length > 0 && <span class="muted"> · {plural(result.polls.length, "poll")}</span>}
               </p>
               {result.polls.length ? (
@@ -648,7 +641,7 @@ function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
                   ))}
                 </ol>
               ) : (
-                <p class="muted small">Your polls will show up here as you type.</p>
+                <p class="muted small">{t("Your polls will show up here as you type.")}</p>
               )}
               {result.notes.map((n, i) => (
                 <p key={i} class="notice small" style={{ marginTop: 6 }}>
@@ -657,11 +650,11 @@ function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
               ))}
               <div class="row" style={{ marginTop: 12 }}>
                 <button class="btn" disabled={!result.polls.length} onClick={() => onPick(result.polls)}>
-                  {result.polls.length ? `Add ${plural(result.polls.length, "poll")}` : "Add polls"}
+                  {result.polls.length ? t("Add {polls}", { polls: plural(result.polls.length, "poll") }) : t("Add polls")}
                 </button>
                 {aiResult && (
                   <button class="btn quiet" onClick={() => setAiResult(null)}>
-                    Back to my text
+                    {t("Back to my text")}
                   </button>
                 )}
               </div>
@@ -672,6 +665,8 @@ function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
     </>
   );
 }
+
+const COLOR_NAMES: Record<LabelColor, string> = { blue: t("Blue"), green: t("Green"), amber: t("Amber"), red: t("Red"), purple: t("Purple"), grey: t("Grey") };
 
 // ---------- settings ----------
 
@@ -721,34 +716,34 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
-      <div class="drawer" role="dialog" aria-modal="true" aria-label="Event settings">
+      <div class="drawer" role="dialog" aria-modal="true" aria-label={t("Event settings")}>
         <div class="spread">
-          <h2>Settings</h2>
-          <button class="btn sm quiet" onClick={onClose} aria-label="Close settings">
+          <h2>{t("Settings")}</h2>
+          <button class="btn sm quiet" onClick={onClose} aria-label={t("Close settings")}>
             <Icon.x />
           </button>
         </div>
 
-        <h3>Questions</h3>
-        {Toggle({ k: "qaOpen", label: "Taking questions" })}
-        {Toggle({ k: "moderation", label: "Review questions first", hint: "New questions stay hidden until you approve them." })}
-        {Toggle({ k: "allowAnonymous", label: "Allow anonymous questions" })}
-        {Toggle({ k: "allowDownvotes", label: "Allow downvotes" })}
-        {Toggle({ k: "audienceReplies", label: "Let attendees reply", hint: "You and your moderators can always reply." })}
-        {Toggle({ k: "hideNames", label: "Hide names from the audience", hint: "Only you and moderators see who asked." })}
+        <h3>{t("Questions")}</h3>
+        {Toggle({ k: "qaOpen", label: t("Taking questions") })}
+        {Toggle({ k: "moderation", label: t("Review questions first"), hint: t("New questions stay hidden until you approve them.") })}
+        {Toggle({ k: "allowAnonymous", label: t("Allow anonymous questions") })}
+        {Toggle({ k: "allowDownvotes", label: t("Allow downvotes") })}
+        {Toggle({ k: "audienceReplies", label: t("Let attendees reply"), hint: t("You and your moderators can always reply.") })}
+        {Toggle({ k: "hideNames", label: t("Hide names from the audience"), hint: t("Only you and moderators see who asked.") })}
         <p class="muted tiny" style={{ marginTop: 6 }}>
-          Repeated questions are spotted for you, so you can merge them. This runs on the server and nothing is sent elsewhere.
+          {t("Repeated questions are spotted for you, so you can merge them. This runs on the server and nothing is sent elsewhere.")}
         </p>
         {meta.ai ? (
-          Toggle({ k: "aiAssist", label: "AI help for repeats", hint: "Also catches repeats worded differently, or in another language. Uses Workers AI on your Cloudflare account." })
+          Toggle({ k: "aiAssist", label: t("AI help for repeats"), hint: t("Also catches repeats worded differently, or in another language. Uses Workers AI on your Cloudflare account.") })
         ) : (
-          <p class="muted tiny">AI help is not set up on this server. See the README to turn it on.</p>
+          <p class="muted tiny">{t("AI help is not set up on this server. See the README to turn it on.")}</p>
         )}
 
-        <p class="label">Open and close questions automatically</p>
+        <p class="label">{t("Open and close questions automatically")}</p>
         <div class="row">
           <label class="small grow">
-            Opens
+            {t("Opens")}
             <input
               class="input"
               type="datetime-local"
@@ -760,21 +755,21 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
             />
           </label>
           <label class="small grow">
-            Closes
+            {t("Closes")}
             <input class="input" type="datetime-local" value={toLocalInput(settings.qaClosesAt)} onChange={(e) => set({ qaClosesAt: fromLocalInput(e.currentTarget.value) })} />
           </label>
         </div>
         <p class="muted tiny" style={{ marginTop: 6 }}>
-          Leave empty to open and close by hand.
+          {t("Leave empty to open and close by hand.")}
         </p>
 
-        <h3>Word filter</h3>
-        <div class="seg" role="group" aria-label="Word filter">
+        <h3>{t("Word filter")}</h3>
+        <div class="seg" role="group" aria-label={t("Word filter")}>
           {(
             [
-              ["off", "Off"],
-              ["mask", "Hide bad words"],
-              ["review", "Send to review"],
+              ["off", t("Off")],
+              ["mask", t("Hide bad words")],
+              ["review", t("Send to review")],
             ] as const
           ).map(([v, l]) => (
             <button key={v} aria-pressed={settings.profanity === v} onClick={() => set({ profanity: v })}>
@@ -783,7 +778,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           ))}
         </div>
         <p class="muted tiny" style={{ marginTop: 6 }}>
-          {settings.profanity === "review" ? "Questions with filtered words wait for your review. The audience sees them with the words hidden." : "Covers common swear words, plus your own list."}
+          {settings.profanity === "review" ? t("Questions with filtered words wait for your review. The audience sees them with the words hidden.") : t("Covers common swear words, plus your own list.")}
         </p>
         {settings.profanity !== "off" && (
           <form
@@ -792,34 +787,34 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
             onSubmit={(e) => {
               e.preventDefault();
               set({ blockedWords: words.split(/[\n,]/) as unknown as string[] });
-              toast("Word list saved");
+              toast(t("Word list saved"));
             }}
           >
             <label class="label" for="bw" style={{ marginTop: 0 }}>
-              Your own words to filter
+              {t("Your own words to filter")}
             </label>
-            <textarea id="bw" class="input" placeholder="e.g. competitor names, spoilers" value={words} onInput={(e) => setWords(e.currentTarget.value)} />
-            <button class="btn sm">Save words</button>
+            <textarea id="bw" class="input" placeholder={t("e.g. competitor names, spoilers")} value={words} onInput={(e) => setWords(e.currentTarget.value)} />
+            <button class="btn sm">{t("Save words")}</button>
           </form>
         )}
 
-        <h3>Labels</h3>
-        <p class="muted tiny">Tag questions to sort them, e.g. by topic. Everyone sees the labels.</p>
+        <h3>{t("Labels")}</h3>
+        <p class="muted tiny">{t("Tag questions to sort them, e.g. by topic. Everyone sees the labels.")}</p>
         <LabelsEditor labels={meta.labels} onSave={(labels) => send({ type: "setLabels", labels })} />
 
-        <h3>Rooms</h3>
-        <p class="muted tiny">Split Q&amp;A into separate rooms, e.g. one per session or track. Attendees pick a room.</p>
+        <h3>{t("Rooms")}</h3>
+        <p class="muted tiny">{t("Split Q&A into separate rooms, e.g. one per session or track. Attendees pick a room.")}</p>
         <RoomsEditor rooms={meta.rooms} code={code} hostKey={hostKey} onSave={(rooms) => send({ type: "setRooms", rooms })} />
 
-        <h3>Audience</h3>
-        {Toggle({ k: "reactions", label: "Emoji reactions", hint: "People can send 👏 ❤️ 🔥 to the big screen." })}
-        <p class="label">Ask people for</p>
-        <div class="seg" role="group" aria-label="What attendees must enter">
+        <h3>{t("Audience")}</h3>
+        {Toggle({ k: "reactions", label: t("Emoji reactions"), hint: t("People can send 👏 ❤️ 🔥 to the big screen.") })}
+        <p class="label">{t("Ask people for")}</p>
+        <div class="seg" role="group" aria-label={t("What attendees must enter")}>
           {(
             [
-              ["none", "Nothing"],
-              ["name", "Name"],
-              ["email", "Name + email"],
+              ["none", t("Nothing")],
+              ["name", t("Name")],
+              ["email", t("Name + email")],
             ] as const
           ).map(([v, l]) => (
             <button key={v} aria-pressed={settings.identity === v} onClick={() => set({ identity: v })}>
@@ -833,50 +828,50 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           onSubmit={(e) => {
             e.preventDefault();
             send({ type: "setPasscode", passcode: pass });
-            toast(pass.trim() ? "Passcode set" : "Passcode removed");
+            toast(pass.trim() ? t("Passcode set") : t("Passcode removed"));
           }}
         >
           <label class="label" for="pc" style={{ marginTop: 0 }}>
-            Passcode
+            {t("Passcode")}
           </label>
           <div class="row nowrap">
-            <input id="pc" class="input" maxLength={20} placeholder="No passcode" value={pass} onInput={(e) => setPass(e.currentTarget.value)} />
-            <button class="btn">Save</button>
+            <input id="pc" class="input" maxLength={20} placeholder={t("No passcode")} value={pass} onInput={(e) => setPass(e.currentTarget.value)} />
+            <button class="btn">{t("Save")}</button>
           </div>
-          <p class="muted tiny">People who join with the code must also type this. Leave empty for no passcode.</p>
+          <p class="muted tiny">{t("People who join with the code must also type this. Leave empty for no passcode.")}</p>
         </form>
 
-        <h3>Moderators</h3>
-        <p class="muted tiny">Moderators can review, label, reply to and highlight questions. They can't change polls or settings.</p>
+        <h3>{t("Moderators")}</h3>
+        <p class="muted tiny">{t("Moderators can review, label, reply to and highlight questions. They can't change polls or settings.")}</p>
         <div class="mod-link" style={{ marginTop: 8 }}>
-          <input class="input" readOnly value={modUrl} aria-label="Moderator link" onFocus={(e) => e.currentTarget.select()} />
-          <button class="btn sm" onClick={() => copy(modUrl, "Moderator link copied")}>
-            Copy
+          <input class="input" readOnly value={modUrl} aria-label={t("Moderator link")} onFocus={(e) => e.currentTarget.select()} />
+          <button class="btn sm" onClick={() => copy(modUrl, t("Moderator link copied"))}>
+            {t("Copy")}
           </button>
         </div>
-        <button class="btn sm ghost" style={{ marginTop: 8 }} onClick={() => confirm("Make a new moderator link? The old link stops working and anyone using it is signed out.") && send({ type: "newModKey" })}>
-          Make a new link
+        <button class="btn sm ghost" style={{ marginTop: 8 }} onClick={() => confirm(t("Make a new moderator link? The old link stops working and anyone using it is signed out.")) && send({ type: "newModKey" })}>
+          {t("Make a new link")}
         </button>
 
-        <h3>Stream and embed</h3>
-        <p class="label" style={{ marginTop: 0 }}>Stream overlay</p>
-        <p class="muted tiny">Add as a browser source in OBS, vMix or StreamYard (1920×1080). It has a see-through background and shows the live poll or the question on screen.</p>
+        <h3>{t("Stream and embed")}</h3>
+        <p class="label" style={{ marginTop: 0 }}>{t("Stream overlay")}</p>
+        <p class="muted tiny">{t("Add as a browser source in OBS, vMix or StreamYard (1920×1080). It has a see-through background and shows the live poll or the question on screen.")}</p>
         <div class="mod-link" style={{ marginTop: 8 }}>
-          <input class="input" readOnly value={overlayUrl} aria-label="Stream overlay link" onFocus={(e) => e.currentTarget.select()} />
-          <button class="btn sm" onClick={() => copy(overlayUrl, "Overlay link copied. Keep it private.")}>
-            Copy
+          <input class="input" readOnly value={overlayUrl} aria-label={t("Stream overlay link")} onFocus={(e) => e.currentTarget.select()} />
+          <button class="btn sm" onClick={() => copy(overlayUrl, t("Overlay link copied. Keep it private."))}>
+            {t("Copy")}
           </button>
         </div>
-        <p class="label">Embed on a website</p>
-        <p class="muted tiny">Paste this into any web page, like an event site or a course page. People can ask and vote without leaving it.</p>
-        <textarea class="input code-snippet" readOnly rows={3} aria-label="Embed code" value={embedCode} onFocus={(e) => e.currentTarget.select()} />
-        <button class="btn sm" style={{ marginTop: 8 }} onClick={() => copy(embedCode, "Embed code copied")}>
-          Copy embed code
+        <p class="label">{t("Embed on a website")}</p>
+        <p class="muted tiny">{t("Paste this into any web page, like an event site or a course page. People can ask and vote without leaving it.")}</p>
+        <textarea class="input code-snippet" readOnly rows={3} aria-label={t("Embed code")} value={embedCode} onFocus={(e) => e.currentTarget.select()} />
+        <button class="btn sm" style={{ marginTop: 8 }} onClick={() => copy(embedCode, t("Embed code copied"))}>
+          {t("Copy embed code")}
         </button>
 
-        <h3>Look</h3>
+        <h3>{t("Look")}</h3>
         <div class="logo-pick">
-          {settings.logo ? <img src={mediaUrl(code, settings.logo)} alt="Event logo" /> : <span class="muted small">No logo</span>}
+          {settings.logo ? <img src={mediaUrl(code, settings.logo)} alt={t("Event logo")} /> : <span class="muted small">{t("No logo")}</span>}
           <input
             ref={logoRef}
             type="file"
@@ -896,15 +891,15 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
             }}
           />
           <button class="btn sm ghost" onClick={() => logoRef.current?.click()} disabled={uploading}>
-            {uploading ? "Uploading…" : settings.logo ? "Change logo" : "Add logo"}
+            {uploading ? t("Uploading…") : settings.logo ? t("Change logo") : t("Add logo")}
           </button>
           {settings.logo && (
             <button class="btn sm quiet" onClick={() => set({ logo: null })}>
-              Remove
+              {t("Remove")}
             </button>
           )}
         </div>
-        <div class="themes" role="group" aria-label="Colour theme" style={{ marginTop: 14 }}>
+        <div class="themes" role="group" aria-label={t("Colour theme")} style={{ marginTop: 14 }}>
           {THEMES.map((t) => (
             <button key={t} aria-pressed={settings.theme === t} onClick={() => set({ theme: t })}>
               <span class="swatch">
@@ -915,23 +910,23 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
             </button>
           ))}
         </div>
-        <p class="label">Big screen</p>
-        <div class="seg" role="group" aria-label="Big screen light or dark">
+        <p class="label">{t("Big screen")}</p>
+        <div class="seg" role="group" aria-label={t("Big screen light or dark")}>
           {(["light", "dark"] as const).map((v) => (
             <button key={v} aria-pressed={settings.screen === v} onClick={() => set({ screen: v })}>
-              {v === "light" ? "Light" : "Dark"}
+              {v === "light" ? t("Light") : t("Dark")}
             </button>
           ))}
         </div>
-        <p class="label">Big screen shows</p>
-        <div class="seg" role="group" aria-label="What the big screen shows" style={{ flexWrap: "wrap" }}>
+        <p class="label">{t("Big screen shows")}</p>
+        <div class="seg" role="group" aria-label={t("What the big screen shows")} style={{ flexWrap: "wrap" }}>
           {(
             [
-              ["auto", "Auto"],
-              ["qa", "Q&A"],
-              ["poll", "Poll"],
-              ["leaderboard", "Leaderboard"],
-              ["code", "Join code"],
+              ["auto", t("Auto")],
+              ["qa", t("Q&A")],
+              ["poll", t("Poll")],
+              ["leaderboard", t("Leaderboard")],
+              ["code", t("Join code")],
             ] as const
           ).map(([m, l]) => (
             <button key={m} aria-pressed={meta.presentMode === m} onClick={() => send({ type: "setPresentMode", mode: m })}>
@@ -940,16 +935,16 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           ))}
         </div>
         <p class="muted tiny" style={{ marginTop: 8 }}>
-          Auto shows the live poll when one is running, and questions the rest of the time.
+          {t("Auto shows the live poll when one is running, and questions the rest of the time.")}
         </p>
 
-        <h3>Privacy</h3>
+        <h3>{t("Privacy")}</h3>
         <p class="label" style={{ marginTop: 6 }}>
-          Delete this event automatically
+          {t("Delete this event automatically")}
         </p>
         <select
           class="input"
-          aria-label="Delete this event automatically"
+          aria-label={t("Delete this event automatically")}
           value=""
           onChange={(e) => {
             const v = e.currentTarget.value;
@@ -957,15 +952,15 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
             deleteIn(v === "never" ? null : Number(v));
           }}
         >
-          <option value="">{settings.deleteAt ? `On ${new Date(settings.deleteAt).toLocaleString()}` : "Never"}</option>
-          <option value="never">Never</option>
-          <option value="1">1 day from now</option>
-          <option value="7">7 days from now</option>
-          <option value="30">30 days from now</option>
-          <option value="90">90 days from now</option>
+          <option value="">{settings.deleteAt ? t("On {date}", { date: new Date(settings.deleteAt).toLocaleString() }) : t("Never")}</option>
+          <option value="never">{t("Never")}</option>
+          <option value="1">{t("1 day from now")}</option>
+          <option value="7">{t("{n} days from now", { n: 7 })}</option>
+          <option value="30">{t("{n} days from now", { n: 30 })}</option>
+          <option value="90">{t("{n} days from now", { n: 90 })}</option>
         </select>
         <p class="muted tiny" style={{ marginTop: 6 }}>
-          Everything is deleted: questions, answers, names and images. Download your results first.
+          {t("Everything is deleted: questions, answers, names and images. Download your results first.")}
         </p>
       </div>
     </>
@@ -984,16 +979,16 @@ function LabelsEditor({ labels, onSave }: { labels: Label[]; onSave: (l: { id?: 
     <div class="edit-list">
       {list.map((l, i) => (
         <div class="row" key={l.id}>
-          <select class="input" aria-label={`Colour for ${l.name}`} value={l.color} onChange={(e) => save(list.map((x, j) => (j === i ? { ...x, color: e.currentTarget.value as LabelColor } : x)))}>
+          <select class="input" aria-label={t("Colour for {name}", { name: l.name })} value={l.color} onChange={(e) => save(list.map((x, j) => (j === i ? { ...x, color: e.currentTarget.value as LabelColor } : x)))}>
             {LABEL_COLORS.map((c) => (
               <option key={c} value={c}>
-                {c[0].toUpperCase() + c.slice(1)}
+                {COLOR_NAMES[c]}
               </option>
             ))}
           </select>
           <LabelChip label={l} />
           <span class="grow" />
-          <button class="btn sm quiet" aria-label={`Delete label ${l.name}`} onClick={() => save(list.filter((_, j) => j !== i))}>
+          <button class="btn sm quiet" aria-label={t("Delete label {name}", { name: l.name })} onClick={() => save(list.filter((_, j) => j !== i))}>
             <Icon.x />
           </button>
         </div>
@@ -1007,27 +1002,27 @@ function LabelsEditor({ labels, onSave }: { labels: Label[]; onSave: (l: { id?: 
           setName("");
         }}
       >
-        <input class="input" maxLength={24} placeholder="New label, e.g. Finance" value={name} onInput={(e) => setName(e.currentTarget.value)} />
-        <button class="btn sm">Add</button>
+        <input class="input" maxLength={24} placeholder={t("New label, e.g. Finance")} value={name} onInput={(e) => setName(e.currentTarget.value)} />
+        <button class="btn sm">{t("Add")}</button>
       </form>
     </div>
   );
 }
 
 function RoomsEditor({ rooms, code, hostKey, onSave }: { rooms: Room[]; code: string; hostKey: string; onSave: (r: { id?: string; name: string }[]) => void }) {
-  const current = rooms.length ? rooms : [{ id: MAIN_ROOM, name: "Main" }];
+  const current = rooms.length ? rooms : [{ id: MAIN_ROOM, name: t("Main") }];
   const [name, setName] = useState("");
   return (
     <div class="edit-list">
       {rooms.length > 1 &&
         current.map((r, i) => (
           <div class="row" key={r.id}>
-            <input class="input" maxLength={40} aria-label="Room name" value={r.name} onChange={(e) => onSave(current.map((x, j) => (j === i ? { ...x, name: e.currentTarget.value } : x)))} />
-            <button class="btn sm ghost" title="Copy a big-screen link that only shows this room" onClick={() => copy(`${location.origin}/present/${code}?room=${r.id}#${hostKey}`, `Big-screen link for ${r.name} copied`)}>
-              Screen link
+            <input class="input" maxLength={40} aria-label={t("Room name")} value={r.name} onChange={(e) => onSave(current.map((x, j) => (j === i ? { ...x, name: e.currentTarget.value } : x)))} />
+            <button class="btn sm ghost" title={t("Copy a big-screen link that only shows this room")} onClick={() => copy(`${location.origin}/present/${code}?room=${r.id}#${hostKey}`, t("Big-screen link for {name} copied", { name: r.name }))}>
+              {t("Screen link")}
             </button>
             {i > 0 && (
-              <button class="btn sm quiet" aria-label={`Delete room ${r.name}`} onClick={() => confirm(`Delete "${r.name}"? Its questions move to "${current[0].name}".`) && onSave(current.filter((_, j) => j !== i))}>
+              <button class="btn sm quiet" aria-label={t("Delete room {name}", { name: r.name })} onClick={() => confirm(t("Delete \"{name}\"? Its questions move to \"{first}\".", { name: r.name, first: current[0].name })) && onSave(current.filter((_, j) => j !== i))}>
                 <Icon.x />
               </button>
             )}
@@ -1042,12 +1037,12 @@ function RoomsEditor({ rooms, code, hostKey, onSave }: { rooms: Room[]; code: st
           setName("");
         }}
       >
-        <input class="input" maxLength={40} placeholder={rooms.length > 1 ? "Another room" : "Add a second room, e.g. Workshop"} value={name} onInput={(e) => setName(e.currentTarget.value)} />
-        <button class="btn sm">Add</button>
+        <input class="input" maxLength={40} placeholder={rooms.length > 1 ? t("Another room") : t("Add a second room, e.g. Workshop")} value={name} onInput={(e) => setName(e.currentTarget.value)} />
+        <button class="btn sm">{t("Add")}</button>
       </form>
       {rooms.length > 1 && (
-        <button class="btn sm quiet" style={{ marginTop: 6 }} onClick={() => confirm("Go back to one room? All questions move to the first room.") && onSave([])}>
-          Use one room
+        <button class="btn sm quiet" style={{ marginTop: 6 }} onClick={() => confirm(t("Go back to one room? All questions move to the first room.")) && onSave([])}>
+          {t("Use one room")}
         </button>
       )}
     </div>
@@ -1074,7 +1069,7 @@ function HostQuestion({ q, act, send, labels, rooms, original }: {
       <div class="body">
         {q.highlighted && (
           <span class="tag hl" style={{ marginBottom: 6 }}>
-            On the big screen
+            {t("On the big screen")}
           </span>
         )}
         <div class="text">{q.text}</div>
@@ -1082,15 +1077,15 @@ function HostQuestion({ q, act, send, labels, rooms, original }: {
         {original && (
           <div class="dup-hint" role="note">
             <span class="dup-title">
-              <Icon.copy /> Looks like a repeat of
+              <Icon.copy /> {t("Looks like a repeat of")}
             </span>
             <q class="dup-text">{original.text}</q>
             <div class="row">
-              <button class="btn sm" onClick={() => send({ type: "mergeQuestion", id: q.id, into: original.id })} title="Move this question's votes and replies to the earlier one, then remove it">
-                Merge into that one
+              <button class="btn sm" onClick={() => send({ type: "mergeQuestion", id: q.id, into: original.id })} title={t("Move this question's votes and replies to the earlier one, then remove it")}>
+                {t("Merge into that one")}
               </button>
               <button class="btn sm quiet" onClick={() => send({ type: "notDuplicate", id: q.id })}>
-                Not a repeat
+                {t("Not a repeat")}
               </button>
             </div>
           </div>
@@ -1108,50 +1103,50 @@ function HostQuestion({ q, act, send, labels, rooms, original }: {
             class="reply-form"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!reply.trim()) return toast("Type a reply first");
+              if (!reply.trim()) return toast(t("Type a reply first"));
               send({ type: "reply", id: q.id, text: reply.trim() });
               setReply("");
               setReplying(false);
             }}
           >
-            <input class="input" maxLength={300} placeholder="Reply to everyone" aria-label="Your reply" autoFocus value={reply} onInput={(e) => setReply(e.currentTarget.value)} />
-            <button class="btn sm">Send</button>
+            <input class="input" maxLength={300} placeholder={t("Reply to everyone")} aria-label={t("Your reply")} autoFocus value={reply} onInput={(e) => setReply(e.currentTarget.value)} />
+            <button class="btn sm">{t("Send")}</button>
             <button type="button" class="btn sm quiet" onClick={() => setReplying(false)}>
-              Cancel
+              {t("Cancel")}
             </button>
           </form>
         )}
         <div class="actions">
           {q.status === "pending" && (
             <button class="btn sm" onClick={() => act("approve", q.id)}>
-              Approve
+              {t("Approve")}
             </button>
           )}
           {q.status !== "archived" && (
             <button class={`btn sm ${q.highlighted ? "on" : "ghost"}`} onClick={() => act("highlight", q.id)}>
-              {q.highlighted ? "Remove from screen" : "Show on screen"}
+              {q.highlighted ? t("Remove from screen") : t("Show on screen")}
             </button>
           )}
           {(q.status === "live" || q.status === "answered") && (
             <button class="btn sm ghost" onClick={() => act("answer", q.id)}>
-              {q.status === "answered" ? "Mark not answered" : "Mark answered"}
+              {q.status === "answered" ? t("Mark not answered") : t("Mark answered")}
             </button>
           )}
           {!replying && (
             <button class="btn sm ghost" onClick={() => setReplying(true)}>
-              Reply
+              {t("Reply")}
             </button>
           )}
           {labels.length > 0 && (
             <button class={`btn sm ${tagging ? "on" : "ghost"}`} onClick={() => setTagging(!tagging)}>
-              {tagging ? "Done" : "Label"}
+              {tagging ? t("Done") : t("Label")}
             </button>
           )}
           <button class="btn sm ghost" onClick={() => act("archive", q.id)}>
-            {q.status === "archived" ? "Restore" : "Archive"}
+            {q.status === "archived" ? t("Restore") : t("Archive")}
           </button>
           {rooms.length > 1 && (
-            <select class="input btn sm ghost" aria-label="Move to room" value={q.room} onChange={(e) => send({ type: "moveQuestion", id: q.id, room: e.currentTarget.value })} style={{ width: "auto" }}>
+            <select class="input btn sm ghost" aria-label={t("Move to room")} value={q.room} onChange={(e) => send({ type: "moveQuestion", id: q.id, room: e.currentTarget.value })} style={{ width: "auto" }}>
               {rooms.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}
@@ -1160,7 +1155,7 @@ function HostQuestion({ q, act, send, labels, rooms, original }: {
             </select>
           )}
           <button class="btn sm danger" onClick={() => act("deleteQuestion", q.id)}>
-            Delete
+            {t("Delete")}
           </button>
         </div>
       </div>
@@ -1179,7 +1174,7 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
   onEdit: () => void;
 }) {
   const confirmThen = (msg: string, m: ClientMsg) => confirm(msg) && send(m);
-  const statusText = p.status === "active" ? "Live now" : p.status === "closed" ? "Closed" : "Not started";
+  const statusText = p.status === "active" ? t("Live now") : p.status === "closed" ? t("Closed") : t("Not started");
   return (
     <div class={`poll-item ${p.status === "active" ? "active" : ""}`}>
       <div class="spread">
@@ -1187,16 +1182,16 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
           <span class={`status ${p.status}`}>{statusText}</span>
           <span class="muted small">
             {TYPE_LABEL[p.type]}
-            {p.type === "quiz" && (p.timeLimit ? `, ${p.timeLimit}s` : ", no timer")}
-            {p.type === "survey" && `, ${p.items.length} questions`}
+            {p.type === "quiz" && (p.timeLimit ? `, ${t("{n}s", { n: p.timeLimit })}` : `, ${t("no timer")}`)}
+            {p.type === "survey" && `, ${plural(p.items.length, "question")}`}
           </span>
         </span>
         <span class="row" style={{ gap: 4 }}>
           {p.status === "active" && p.type === "quiz" && !p.revealed && <Countdown poll={p} clockOffset={clockOffset} />}
-          <button class="btn sm quiet" disabled={first} aria-label="Move up" onClick={() => send({ type: "movePoll", pollId: p.id, dir: "up" })}>
+          <button class="btn sm quiet" disabled={first} aria-label={t("Move up")} onClick={() => send({ type: "movePoll", pollId: p.id, dir: "up" })}>
             ↑
           </button>
-          <button class="btn sm quiet" disabled={last} aria-label="Move down" onClick={() => send({ type: "movePoll", pollId: p.id, dir: "down" })}>
+          <button class="btn sm quiet" disabled={last} aria-label={t("Move down")} onClick={() => send({ type: "movePoll", pollId: p.id, dir: "down" })}>
             ↓
           </button>
         </span>
@@ -1210,35 +1205,35 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
       <div class="actions">
         {p.status === "active" ? (
           <button class="btn sm" onClick={() => send({ type: "closePoll", pollId: p.id })}>
-            Close poll
+            {t("Close poll")}
           </button>
         ) : (
           <button class="btn sm accent" onClick={() => send({ type: "activatePoll", pollId: p.id })}>
-            {p.status === "closed" ? "Reopen" : "Launch"}
+            {p.status === "closed" ? t("Reopen") : t("Launch")}
           </button>
         )}
         {p.type === "quiz" ? (
           <button class={`btn sm ${p.revealed ? "on" : "ghost"}`} onClick={() => send({ type: "revealAnswer", pollId: p.id })}>
-            {p.revealed ? "Hide answer" : "Reveal answer"}
+            {p.revealed ? t("Hide answer") : t("Reveal answer")}
           </button>
         ) : (
           <button class="btn sm ghost" onClick={() => send({ type: "toggleResults", pollId: p.id })}>
-            {p.showResults ? "Hide results from audience" : "Show results to audience"}
+            {p.showResults ? t("Hide results from audience") : t("Show results to audience")}
           </button>
         )}
         <button class="btn sm ghost" onClick={onEdit}>
-          Edit
+          {t("Edit")}
         </button>
         <button class="btn sm ghost" onClick={() => send({ type: "duplicatePoll", pollId: p.id })}>
-          Duplicate
+          {t("Duplicate")}
         </button>
         {results.total > 0 && (
-          <button class="btn sm ghost" onClick={() => confirmThen("Clear every answer to this poll?", { type: "resetPoll", pollId: p.id })}>
-            Clear answers
+          <button class="btn sm ghost" onClick={() => confirmThen(t("Clear every answer to this poll?"), { type: "resetPoll", pollId: p.id })}>
+            {t("Clear answers")}
           </button>
         )}
-        <button class="btn sm danger" onClick={() => confirmThen("Delete this poll and its answers?", { type: "deletePoll", pollId: p.id })}>
-          Delete
+        <button class="btn sm danger" onClick={() => confirmThen(t("Delete this poll and its answers?"), { type: "deletePoll", pollId: p.id })}>
+          {t("Delete")}
         </button>
       </div>
     </div>
@@ -1249,7 +1244,7 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
 
 const ALL_TYPES: PollType[] = ["multiple", "quiz", "rating", "scale", "ranking", "wordcloud", "open", "points", "grid", "pin", "survey"];
 const needsOptions = (t: string) => t === "multiple" || t === "quiz" || t === "ranking" || t === "points" || t === "grid";
-const DEFAULT_AXES: [string, string] = ["Impact", "Effort"];
+const DEFAULT_AXES: [string, string] = [t("Impact"), t("Effort")];
 
 function newItem(type: ItemType = "multiple"): ItemDraft {
   return {
@@ -1341,21 +1336,21 @@ function OptionsEditor({ code, hostKey, options, images, correct, quiz, onChange
       {options.map((o, i) => (
         <div class="opt-row" key={i}>
           {quiz && (
-            <label class="check" title="Correct answer">
+            <label class="check" title={t("Correct answer")}>
               <input
                 type="checkbox"
-                aria-label={`Option ${i + 1} is correct`}
+                aria-label={t("Option {n} is correct", { n: i + 1 })}
                 checked={!!correct?.includes(i)}
                 onChange={(e) => onChange({ options, images: imgs, correct: e.currentTarget.checked ? [...(correct ?? []), i] : (correct ?? []).filter((c) => c !== i) })}
               />
             </label>
           )}
-          <button type="button" class="img-btn" aria-label={imgs[i] ? `Change image for option ${i + 1}` : `Add image to option ${i + 1}`} onClick={() => (imgs[i] ? onChange({ options, images: imgs.map((x, j) => (j === i ? null : x)), correct }) : pickImage(i))} title={imgs[i] ? "Remove image" : "Add image"}>
+          <button type="button" class="img-btn" aria-label={imgs[i] ? t("Change image for option {n}", { n: i + 1 }) : t("Add image to option {n}", { n: i + 1 })} onClick={() => (imgs[i] ? onChange({ options, images: imgs.map((x, j) => (j === i ? null : x)), correct }) : pickImage(i))} title={imgs[i] ? t("Remove image") : t("Add image")}>
             {uploading === i ? "…" : imgs[i] ? <img src={mediaUrl(code, imgs[i]!)} alt="" /> : <Icon.image />}
           </button>
-          <input class="input" maxLength={120} placeholder={`Option ${i + 1}`} value={o} aria-label={`Option ${i + 1}`} onInput={(e) => onChange({ options: options.map((x, j) => (j === i ? e.currentTarget.value : x)), images: imgs, correct })} />
+          <input class="input" maxLength={120} placeholder={t("Option {n}", { n: i + 1 })} value={o} aria-label={t("Option {n}", { n: i + 1 })} onInput={(e) => onChange({ options: options.map((x, j) => (j === i ? e.currentTarget.value : x)), images: imgs, correct })} />
           {options.length > 2 && (
-            <button type="button" class="btn sm quiet" aria-label={`Remove option ${i + 1}`} onClick={() => remove(i)}>
+            <button type="button" class="btn sm quiet" aria-label={t("Remove option {n}", { n: i + 1 })} onClick={() => remove(i)}>
               <Icon.x />
             </button>
           )}
@@ -1363,7 +1358,7 @@ function OptionsEditor({ code, hostKey, options, images, correct, quiz, onChange
       ))}
       {options.length < 10 && (
         <button type="button" class="btn sm ghost" style={{ marginTop: 10 }} onClick={() => onChange({ options: [...options, ""], images: [...imgs, null], correct })}>
-          Add option
+          {t("Add option")}
         </button>
       )}
     </div>
@@ -1376,7 +1371,7 @@ function RangeEditor({ range, onChange }: { range: PollDraft["range"]; onChange:
   return (
     <div class="row">
       <label class="small">
-        From{" "}
+        {t("From")}{" "}
         <select class="input" style={{ width: "auto", display: "inline-block" }} value={r.min} onChange={(e) => onChange({ ...r, min: num(e.currentTarget.value) })}>
           {[0, 1].map((n) => (
             <option key={n}>{n}</option>
@@ -1384,15 +1379,15 @@ function RangeEditor({ range, onChange }: { range: PollDraft["range"]; onChange:
         </select>
       </label>
       <label class="small">
-        to{" "}
+        {t("to")}{" "}
         <select class="input" style={{ width: "auto", display: "inline-block" }} value={r.max} onChange={(e) => onChange({ ...r, max: num(e.currentTarget.value) })}>
           {[3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
             <option key={n}>{n}</option>
           ))}
         </select>
       </label>
-      <input class="input grow" style={{ flex: "1 1 120px" }} maxLength={30} placeholder="Low end label (optional)" value={r.minLabel} onInput={(e) => onChange({ ...r, minLabel: e.currentTarget.value })} />
-      <input class="input grow" style={{ flex: "1 1 120px" }} maxLength={30} placeholder="High end label (optional)" value={r.maxLabel} onInput={(e) => onChange({ ...r, maxLabel: e.currentTarget.value })} />
+      <input class="input grow" style={{ flex: "1 1 120px" }} maxLength={30} placeholder={t("Low end label (optional)")} value={r.minLabel} onInput={(e) => onChange({ ...r, minLabel: e.currentTarget.value })} />
+      <input class="input grow" style={{ flex: "1 1 120px" }} maxLength={30} placeholder={t("High end label (optional)")} value={r.maxLabel} onInput={(e) => onChange({ ...r, maxLabel: e.currentTarget.value })} />
     </div>
   );
 }
@@ -1406,14 +1401,14 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
 
   const save = (e: Event) => {
     e.preventDefault();
-    if (!d.title.trim()) return toast(d.type === "survey" ? "Give the survey a name" : "Type the question");
-    if (needsOptions(d.type) && d.options.filter((o, i) => o.trim() || d.images?.[i]).length < 2) return toast("Add at least 2 options");
-    if (d.type === "quiz" && !d.correct.length) return toast("Tick the correct answer");
-    if (d.type === "pin" && !d.image) return toast("Add the picture people will tap on");
+    if (!d.title.trim()) return toast(d.type === "survey" ? t("Give the survey a name") : t("Type the question"));
+    if (needsOptions(d.type) && d.options.filter((o, i) => o.trim() || d.images?.[i]).length < 2) return toast(t("Add at least 2 options"));
+    if (d.type === "quiz" && !d.correct.length) return toast(t("Tick the correct answer"));
+    if (d.type === "pin" && !d.image) return toast(t("Add the picture people will tap on"));
     if (d.type === "survey") {
-      if (!items.length) return toast("Add a question to the survey");
-      if (items.some((it) => !it.title.trim())) return toast("Every survey question needs text");
-      if (items.some((it) => it.type === "pin" && !it.image)) return toast("Add a picture to each pin question");
+      if (!items.length) return toast(t("Add a question to the survey"));
+      if (items.some((it) => !it.title.trim())) return toast(t("Every survey question needs text"));
+      if (items.some((it) => it.type === "pin" && !it.image)) return toast(t("Add a picture to each pin question"));
     }
     onSave({ ...d, items: d.type === "survey" ? items : [] });
   };
@@ -1421,12 +1416,12 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
   return (
     <form class="editor stack" onSubmit={save}>
       <div class="spread">
-        <b>{d.id ? "Edit poll" : "New poll"}</b>
-        <button type="button" class="btn sm quiet" onClick={onCancel} aria-label="Close editor">
+        <b>{d.id ? t("Edit poll") : t("New poll")}</b>
+        <button type="button" class="btn sm quiet" onClick={onCancel} aria-label={t("Close editor")}>
           <Icon.x />
         </button>
       </div>
-      <div class="type-grid" role="group" aria-label="Poll type">
+      <div class="type-grid" role="group" aria-label={t("Poll type")}>
         {ALL_TYPES.map((t) => (
           <button type="button" key={t} aria-pressed={d.type === t} onClick={() => setType(t)}>
             {TYPE_LABEL[t]}
@@ -1436,29 +1431,29 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
       </div>
       <div>
         <label class="label" for="ptitle">
-          {d.type === "survey" ? "Survey name" : "Question"}
+          {d.type === "survey" ? t("Survey name") : t("Question")}
         </label>
-        <input id="ptitle" class="input" maxLength={300} autoFocus value={d.title} onInput={(e) => set({ title: e.currentTarget.value })} placeholder={d.type === "survey" ? "e.g. Session feedback" : "What do you want to ask?"} />
+        <input id="ptitle" class="input" maxLength={300} autoFocus value={d.title} onInput={(e) => set({ title: e.currentTarget.value })} placeholder={d.type === "survey" ? t("e.g. Session feedback") : t("What do you want to ask?")} />
       </div>
 
       {needsOptions(d.type) && (
         <div>
-          <span class="label">{d.type === "quiz" ? "Answers (tick the correct one)" : "Options"}</span>
+          <span class="label">{d.type === "quiz" ? t("Answers (tick the correct one)") : t("Options")}</span>
           <OptionsEditor code={code} hostKey={hostKey} options={d.options} images={d.images ?? []} correct={d.correct} quiz={d.type === "quiz"} onChange={(o) => set({ options: o.options, images: o.images, correct: o.correct ?? d.correct })} />
         </div>
       )}
       {d.type === "multiple" && (
         <label class="check small">
-          <input type="checkbox" checked={d.multi} onChange={(e) => set({ multi: e.currentTarget.checked })} /> People can pick more than one
+          <input type="checkbox" checked={d.multi} onChange={(e) => set({ multi: e.currentTarget.checked })} /> {t("People can pick more than one")}
         </label>
       )}
       {d.type === "quiz" && (
         <label class="small row">
-          Time to answer
+          {t("Time to answer")}
           <select class="input" style={{ width: "auto" }} value={d.timeLimit ?? 20} onChange={(e) => set({ timeLimit: Number(e.currentTarget.value) })}>
             {[0, 10, 15, 20, 30, 45, 60, 90, 120].map((n) => (
               <option key={n} value={n}>
-                {n ? `${n} seconds` : "No timer"}
+                {n ? t("{n} seconds", { n }) : t("No timer")}
               </option>
             ))}
           </select>
@@ -1467,22 +1462,22 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
       {d.type === "scale" && <RangeEditor range={d.range} onChange={(range) => set({ range })} />}
       {d.type === "grid" && <AxesEditor axes={d.axes ?? DEFAULT_AXES} onChange={(axes) => set({ axes })} />}
       {d.type === "pin" && <ImagePicker code={code} hostKey={hostKey} image={d.image ?? null} onChange={(image) => set({ image })} />}
-      {d.type === "points" && <p class="muted small">Each person shares out 100 points across the options.</p>}
-      {d.type === "rating" && <p class="muted small">People rate from 1 to 5 stars.</p>}
-      {d.type === "ranking" && <p class="muted small">People put the options in order. The big screen shows the overall order.</p>}
-      {d.type === "wordcloud" && <p class="muted small">People send short words. The most popular grow biggest.</p>}
-      {d.type === "open" && <p class="muted small">People type a short answer. Newest answers show first.</p>}
+      {d.type === "points" && <p class="muted small">{t("Each person shares out 100 points across the options.")}</p>}
+      {d.type === "rating" && <p class="muted small">{t("People rate from 1 to 5 stars.")}</p>}
+      {d.type === "ranking" && <p class="muted small">{t("People put the options in order. The big screen shows the overall order.")}</p>}
+      {d.type === "wordcloud" && <p class="muted small">{t("People send short words. The most popular grow biggest.")}</p>}
+      {d.type === "open" && <p class="muted small">{t("People type a short answer. Newest answers show first.")}</p>}
 
       {d.type === "survey" && (
         <div>
-          <span class="label">Questions</span>
+          <span class="label">{t("Questions")}</span>
           {items.map((it, i) => (
             <div class="sub-item stack-sm" key={i}>
               <div class="row nowrap">
                 <span class="muted small num" style={{ width: 22 }}>
                   {i + 1}.
                 </span>
-                <select class="input" style={{ width: "auto" }} aria-label={`Question ${i + 1} type`} value={it.type} onChange={(e) => setItem(i, { ...newItem(e.currentTarget.value as ItemType), title: it.title })}>
+                <select class="input" style={{ width: "auto" }} aria-label={t("Question {n} type", { n: i + 1 })} value={it.type} onChange={(e) => setItem(i, { ...newItem(e.currentTarget.value as ItemType), title: it.title })}>
                   {ITEM_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {TYPE_LABEL[t]}
@@ -1490,18 +1485,18 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
                   ))}
                 </select>
                 <span class="grow" />
-                <button type="button" class="btn sm quiet" disabled={i === 0} aria-label="Move question up" onClick={() => set({ items: items.map((x, j) => (j === i - 1 ? items[i] : j === i ? items[i - 1] : x)) })}>
+                <button type="button" class="btn sm quiet" disabled={i === 0} aria-label={t("Move question up")} onClick={() => set({ items: items.map((x, j) => (j === i - 1 ? items[i] : j === i ? items[i - 1] : x)) })}>
                   ↑
                 </button>
-                <button type="button" class="btn sm quiet" aria-label="Remove question" disabled={items.length === 1} onClick={() => set({ items: items.filter((_, j) => j !== i) })}>
+                <button type="button" class="btn sm quiet" aria-label={t("Remove question")} disabled={items.length === 1} onClick={() => set({ items: items.filter((_, j) => j !== i) })}>
                   <Icon.x />
                 </button>
               </div>
-              <input class="input" maxLength={300} placeholder="Question" aria-label={`Question ${i + 1}`} value={it.title} onInput={(e) => setItem(i, { title: e.currentTarget.value })} />
+              <input class="input" maxLength={300} placeholder={t("Question")} aria-label={t("Question {n}", { n: i + 1 })} value={it.title} onInput={(e) => setItem(i, { title: e.currentTarget.value })} />
               {needsOptions(it.type) && <OptionsEditor code={code} hostKey={hostKey} options={it.options} images={it.images ?? []} onChange={(o) => setItem(i, { options: o.options, images: o.images })} />}
               {it.type === "multiple" && (
                 <label class="check small">
-                  <input type="checkbox" checked={!!it.multi} onChange={(e) => setItem(i, { multi: e.currentTarget.checked })} /> Allow more than one
+                  <input type="checkbox" checked={!!it.multi} onChange={(e) => setItem(i, { multi: e.currentTarget.checked })} /> {t("Allow more than one")}
                 </label>
               )}
               {it.type === "scale" && <RangeEditor range={it.range ?? null} onChange={(range) => setItem(i, { range })} />}
@@ -1511,18 +1506,18 @@ function PollEditor({ code, hostKey, draft, onSave, onCancel }: { code: string; 
           ))}
           {items.length < 15 && (
             <button type="button" class="btn sm ghost" style={{ marginTop: 10 }} onClick={() => set({ items: [...items, newItem("multiple")] })}>
-              Add question
+              {t("Add question")}
             </button>
           )}
         </div>
       )}
 
       <div class="row">
-        <button class="btn">{d.id ? "Save changes" : "Save poll"}</button>
+        <button class="btn">{d.id ? t("Save changes") : t("Save poll")}</button>
         <button type="button" class="btn ghost" onClick={onCancel}>
-          Cancel
+          {t("Cancel")}
         </button>
-        {d.id && <span class="muted tiny">Changing the type or options clears existing answers.</span>}
+        {d.id && <span class="muted tiny">{t("Changing the type or options clears existing answers.")}</span>}
       </div>
     </form>
   );
@@ -1533,11 +1528,11 @@ function AxesEditor({ axes, onChange }: { axes: [string, string]; onChange: (a: 
   return (
     <div class="row">
       <label class="small grow">
-        Across (left to right)
+        {t("Across (left to right)")}
         <input class="input" maxLength={30} value={axes[0]} onInput={(e) => onChange([e.currentTarget.value, axes[1]])} />
       </label>
       <label class="small grow">
-        Up (bottom to top)
+        {t("Up (bottom to top)")}
         <input class="input" maxLength={30} value={axes[1]} onInput={(e) => onChange([axes[0], e.currentTarget.value])} />
       </label>
     </div>
@@ -1549,7 +1544,7 @@ function ImagePicker({ code, hostKey, image, onChange }: { code: string; hostKey
   const [busy, setBusy] = useState(false);
   return (
     <div class="stack-sm">
-      <span class="label">Picture to tap on</span>
+      <span class="label">{t("Picture to tap on")}</span>
       {image && (
         <div class="pin-wrap" style={{ maxWidth: 320 }}>
           <img src={mediaUrl(code, image)} alt="" />
@@ -1575,9 +1570,9 @@ function ImagePicker({ code, hostKey, image, onChange }: { code: string; hostKey
       />
       <div class="row">
         <button type="button" class="btn sm ghost" disabled={busy} onClick={() => ref.current?.click()}>
-          {busy ? "Uploading…" : image ? "Change picture" : "Upload a picture"}
+          {busy ? t("Uploading…") : image ? t("Change picture") : t("Upload a picture")}
         </button>
-        <span class="muted tiny">A map, floor plan, chart or photo works well.</span>
+        <span class="muted tiny">{t("A map, floor plan, chart or photo works well.")}</span>
       </div>
     </div>
   );

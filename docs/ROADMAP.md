@@ -256,7 +256,7 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 - [x] Embed script for any website (`/embed.js`)
 - [ ] Public API + webhooks
 - [ ] PowerPoint web add-in
-- [ ] Translations (start: English, French, Spanish)
+- [x] Translations: English, French, Spanish (auto from the phone's language, menu to switch, `?lang=` for big screens)
 - [ ] Team quiz mode
 
 ### Phase 4 — Enterprise-ready (after v1.0)

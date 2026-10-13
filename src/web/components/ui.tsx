@@ -4,34 +4,35 @@ import type { Item, Label, Leaderboard, Poll, PollType, Question, Reaction, Repl
 import { POINTS_BUDGET } from "../../shared/protocol";
 import { secondsLeft } from "../../shared/store";
 import type { ConnStatus } from "../lib/room";
+import { LANGS, type Lang, chooseLang, lang, t, tj } from "../lib/i18n";
 import { ago, CFG, mediaUrl, plural } from "../lib/util";
 
 export const TYPE_LABEL: Record<PollType, string> = {
-  multiple: "Multiple choice",
-  quiz: "Quiz",
-  rating: "Rating",
-  scale: "Scale",
-  ranking: "Ranking",
-  wordcloud: "Word cloud",
-  open: "Open text",
-  points: "100 points",
-  grid: "2×2 grid",
-  pin: "Pin on image",
-  survey: "Survey",
+  multiple: t("Multiple choice"),
+  quiz: t("Quiz"),
+  rating: t("Rating"),
+  scale: t("Scale"),
+  ranking: t("Ranking"),
+  wordcloud: t("Word cloud"),
+  open: t("Open text"),
+  points: t("100 points"),
+  grid: t("2×2 grid"),
+  pin: t("Pin on image"),
+  survey: t("Survey"),
 };
 
 export const TYPE_HINT: Record<PollType, string> = {
-  multiple: "Pick one or more",
-  quiz: "Timer and points",
-  rating: "1 to 5 stars",
-  scale: "Number scale",
-  ranking: "Put in order",
-  wordcloud: "Short words",
-  open: "Free text",
-  points: "Share out points",
-  grid: "Plot on two axes",
-  pin: "Tap a picture",
-  survey: "Several questions",
+  multiple: t("Pick one or more"),
+  quiz: t("Timer and points"),
+  rating: t("1 to 5 stars"),
+  scale: t("Number scale"),
+  ranking: t("Put in order"),
+  wordcloud: t("Short words"),
+  open: t("Free text"),
+  points: t("Share out points"),
+  grid: t("Plot on two axes"),
+  pin: t("Tap a picture"),
+  survey: t("Several questions"),
 };
 
 // ---------- icons (inline so there's nothing extra to load) ----------
@@ -67,12 +68,12 @@ export const Icon = {
 export function Brand({ logo, code }: { logo?: string | null; code?: string }) {
   if (logo && code)
     return (
-      <a class="brand" href="/" aria-label={`${CFG.name} home`}>
-        <img class="event-logo" src={mediaUrl(code, logo)} alt="Event logo" />
+      <a class="brand" href="/" aria-label={t("{name} home", { name: CFG.name })}>
+        <img class="event-logo" src={mediaUrl(code, logo)} alt={t("Event logo")} />
       </a>
     );
   return (
-    <a class="brand" href="/" aria-label={`${CFG.name} home`}>
+    <a class="brand" href="/" aria-label={t("{name} home", { name: CFG.name })}>
       {CFG.logoUrl ? (
         <img src={CFG.logoUrl} alt={CFG.name} style={{ height: 28 }} />
       ) : (
@@ -91,14 +92,31 @@ export function TopBar({ title, children, logo, code }: { title?: string; childr
       <Brand logo={logo} code={code} />
       <div class="title">{title}</div>
       {children}
+      <LangPicker />
     </header>
+  );
+}
+
+/** Small language menu. Changing it reloads the page in the new language. */
+export function LangPicker({ label = false }: { label?: boolean }) {
+  return (
+    <label class={`lang-pick ${label ? "with-label" : ""}`}>
+      <span class={label ? "" : "sr-only"}>{t("Language")}</span>
+      <select value={lang} onChange={(e) => chooseLang(e.currentTarget.value as Lang)}>
+        {(Object.keys(LANGS) as Lang[]).map((l) => (
+          <option key={l} value={l}>
+            {label ? LANGS[l] : l.toUpperCase()}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
 export function ConnDot({ status }: { status: ConnStatus }) {
   const on = status === "online";
   return (
-    <span class="chip" title={on ? "Connected" : "Reconnecting…"} aria-label={on ? "Connected" : "Reconnecting"}>
+    <span class="chip" title={on ? t("Connected") : t("Reconnecting…")} aria-label={on ? t("Connected") : t("Reconnecting")}>
       <span class={`dot ${on ? "" : "off"}`} />
     </span>
   );
@@ -122,7 +140,7 @@ export function Message({ title, children }: { title: string; children?: Compone
           <h1>{title}</h1>
           {children}
           <a class="btn" href="/">
-            Back to start
+            {t("Back to start")}
           </a>
         </div>
       </div>
@@ -134,22 +152,22 @@ export function Message({ title, children }: { title: string; children?: Compone
 export function ConnProblem({ status, code }: { status: ConnStatus; code: string }) {
   if (status === "not-found")
     return (
-      <Message title="Event not found">
+      <Message title={t("Event not found")}>
         <p class="muted">
-          There's no event with code <b>{code}</b>. Check the code, or ask the host if it has ended.
+          {tj("There's no event with code {code}. Check the code, or ask the host if it has ended.", { code: <b>{code}</b> })}
         </p>
       </Message>
     );
   if (status === "full")
     return (
-      <Message title="This event is full">
-        <p class="muted">The host's participant limit has been reached. Try again in a few minutes.</p>
+      <Message title={t("This event is full")}>
+        <p class="muted">{t("The host's participant limit has been reached. Try again in a few minutes.")}</p>
       </Message>
     );
   if (status === "forbidden")
     return (
-      <Message title="Host link needed">
-        <p class="muted">Open this event from the private host link you got when you created it.</p>
+      <Message title={t("Host link needed")}>
+        <p class="muted">{t("Open this event from the private host link you got when you created it.")}</p>
       </Message>
     );
   return null;
@@ -162,8 +180,8 @@ export function useTick(active: boolean, ms = 250) {
   const [, set] = useState(0);
   useEffect(() => {
     if (!active) return;
-    const t = setInterval(() => set((n) => n + 1), ms);
-    return () => clearInterval(t);
+    const id = setInterval(() => set((n) => n + 1), ms);
+    return () => clearInterval(id);
   }, [active, ms]);
 }
 
@@ -175,7 +193,7 @@ export function Countdown({ poll, clockOffset, big = false }: { poll: Poll; cloc
   const c = 2 * Math.PI * r;
   const frac = poll.timeLimit ? left / poll.timeLimit : 0;
   return (
-    <div class={`countdown ${big ? "big" : ""} ${left <= 5 ? "low" : ""}`} role="timer" aria-label={`${left} seconds left`}>
+    <div class={`countdown ${big ? "big" : ""} ${left <= 5 ? "low" : ""}`} role="timer" aria-label={t("{time} left", { time: plural(left, "second") })}>
       <svg viewBox="0 0 60 60">
         <circle class="bg" cx="30" cy="30" r={r} />
         <circle class="fg" cx="30" cy="30" r={r} stroke-dasharray={c} stroke-dashoffset={c * (1 - frac)} />
@@ -213,10 +231,10 @@ function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsDa
     return (
       <>
         {order.map((x, pos) => (
-          <Bar key={x.i} label={x.o} value={`${x.s} pts`} pct={(x.s / POINTS_BUDGET) * 100} img={img(x.i)} lead={pos === 0 && r.total > 0} />
+          <Bar key={x.i} label={x.o} value={t("{n} pts", { n: x.s })} pct={(x.s / POINTS_BUDGET) * 100} img={img(x.i)} lead={pos === 0 && r.total > 0} />
         ))}
         <p class="muted tiny" style={{ marginTop: 8 }}>
-          Average points given, out of {POINTS_BUDGET}.
+          {t("Average points given, out of {n}.", { n: POINTS_BUDGET })}
         </p>
       </>
     );
@@ -244,7 +262,7 @@ function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsDa
           <Bar key={x.i} label={`${pos + 1}. ${x.o}`} value={x.s.toFixed(1)} pct={(x.s / max) * 100} img={img(x.i)} lead={pos === 0 && r.total > 0} />
         ))}
         <p class="muted tiny" style={{ marginTop: 8 }}>
-          Score = average points (top place = {max}).
+          {t("Score = average points (top place = {max}).", { max })}
         </p>
       </>
     );
@@ -261,9 +279,9 @@ function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsDa
             <small> / {top}</small>
           </div>
         ) : (
-          <p class="avg-empty">No answers yet</p>
+          <p class="avg-empty">{t("No answers yet")}</p>
         )}
-        <div class="hist" aria-label="Spread of answers">
+        <div class="hist" aria-label={t("Spread of answers")}>
           {r.counts.map((c, i) => (
             <div key={i} title={`${min + i}: ${c}`}>
               <span>{c || ""}</span>
@@ -282,7 +300,7 @@ function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsDa
     );
   }
   if (item.type === "wordcloud" && r.words) {
-    if (!r.words.length) return <Empty>Words will appear here as people send them.</Empty>;
+    if (!r.words.length) return <Empty>{t("Words will appear here as people send them.")}</Empty>;
     const max = Math.max(1, ...r.words.map((w) => w[1]));
     const base = big ? 22 : 15;
     const span = big ? 78 : 34;
@@ -297,7 +315,7 @@ function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsDa
     );
   }
   if (item.type === "open" && r.answers) {
-    if (!r.answers.length) return <Empty>Answers will appear here as people send them.</Empty>;
+    if (!r.answers.length) return <Empty>{t("Answers will appear here as people send them.")}</Empty>;
     return (
       <ul class="answers">
         {r.answers.slice(0, big ? 10 : 50).map((a, i) => (
@@ -313,8 +331,8 @@ export function ResultsView({ poll, results, code, big = false }: { poll: Poll; 
   if (results.hidden)
     return (
       <p class="muted">
-        {plural(results.total, "response")} so far.{" "}
-        {poll.type === "quiz" ? "Results show when the answer is revealed." : "The host is keeping results hidden for now."}
+        {t("{responses} so far.", { responses: plural(results.total, "response") })}{" "}
+        {poll.type === "quiz" ? t("Results show when the answer is revealed.") : t("The host is keeping results hidden for now.")}
       </p>
     );
   if (poll.type === "survey")
@@ -330,7 +348,7 @@ export function ResultsView({ poll, results, code, big = false }: { poll: Poll; 
           </div>
         ))}
         <p class="muted small">
-          {results.total} {results.total === 1 ? "person" : "people"} took part
+          {t("{people} took part", { people: plural(results.total, "person") })}
         </p>
       </div>
     );
@@ -351,12 +369,12 @@ export function ResultsView({ poll, results, code, big = false }: { poll: Poll; 
 export function QuestionMeta({ q, mine }: { q: Question; mine?: boolean }) {
   return (
     <div class="meta">
-      <span>{mine ? "You" : q.name || "Anonymous"}</span>
+      <span>{mine ? t("You") : q.name || t("Anonymous")}</span>
       <span>{ago(q.ts)}</span>
-      {q.edited && <span>edited</span>}
-      {q.status === "pending" && <span class="tag pending">Waiting for approval</span>}
-      {q.status === "answered" && <span class="tag answered">Answered</span>}
-      {q.status === "archived" && <span class="tag archived">Archived</span>}
+      {q.edited && <span>{t("edited")}</span>}
+      {q.status === "pending" && <span class="tag pending">{t("Waiting for approval")}</span>}
+      {q.status === "answered" && <span class="tag answered">{t("Answered")}</span>}
+      {q.status === "archived" && <span class="tag archived">{t("Archived")}</span>}
     </div>
   );
 }
@@ -364,7 +382,7 @@ export function QuestionMeta({ q, mine }: { q: Question; mine?: boolean }) {
 export function VoteCount({ q }: { q: Question }) {
   const s = q.votes - q.downs;
   return (
-    <div class="vote static num" aria-label={`Score ${s}: ${plural(q.votes, "upvote")}, ${plural(q.downs, "downvote")}`} title={q.downs ? `${q.votes} up, ${q.downs} down` : undefined}>
+    <div class="vote static num" aria-label={t("Score {score}: {up}, {down}", { score: s, up: plural(q.votes, "upvote"), down: plural(q.downs, "downvote") })} title={q.downs ? t("{up} up, {down} down", { up: q.votes, down: q.downs }) : undefined}>
       <Icon.up />
       <span>{s}</span>
     </div>
@@ -380,12 +398,12 @@ export function Podium({ board }: { board: Leaderboard }) {
       {e ? (
         <>
           <div class="who">{e.name}</div>
-          <div class="pts num">{e.points.toLocaleString()} pts</div>
+          <div class="pts num">{t("{n} pts", { n: e.points })}</div>
         </>
       ) : (
         <div class="pts">—</div>
       )}
-      <div class="block" aria-label={`Place ${place}`}>
+      <div class="block" aria-label={t("Place {n}", { n: place })}>
         {place}
       </div>
     </div>
@@ -409,7 +427,7 @@ export function Board({ board, from = 0, limit = 10 }: { board: Leaderboard; fro
           <span class="rank">{from + i + 1}</span>
           <span class="grow">{e.name}</span>
           <span class="muted small">{plural(e.correct, "correct answer")}</span>
-          <span class="pts">{e.points.toLocaleString()}</span>
+          <span class="pts">{e.points.toLocaleString(lang)}</span>
         </li>
       ))}
     </ol>
@@ -462,8 +480,8 @@ export function Confetti({ fire }: { fire: unknown }) {
       spin: (Math.random() - 0.5) * 1440,
     }));
     setPieces(p);
-    const t = setTimeout(() => setPieces([]), 4800);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setPieces([]), 4800);
+    return () => clearTimeout(timer);
   }, [fire]);
   if (!pieces.length) return null;
   return (
@@ -486,9 +504,9 @@ export function GridChart({ item, pairs, total, big }: { item: Item; pairs: [num
   const pad = 34;
   const pos = (v: number) => pad + ((v - min) / Math.max(1, max - min)) * (W - pad * 2);
   const [hover, setHover] = useState<number | null>(null);
-  if (!total) return <Empty>Dots appear here as people answer.</Empty>;
+  if (!total) return <Empty>{t("Dots appear here as people answer.")}</Empty>;
   return (
-    <figure class={`grid-chart ${big ? "big" : ""}`} aria-label={`${ax} versus ${ay}`}>
+    <figure class={`grid-chart ${big ? "big" : ""}`} aria-label={t("{x} versus {y}", { x: ax, y: ay })}>
       <svg viewBox={`0 0 ${W} ${W}`} role="img">
         <rect x={pad} y={pad} width={W - pad * 2} height={W - pad * 2} class="g-frame" />
         <line x1={W / 2} y1={pad} x2={W / 2} y2={W - pad} class="g-mid" />
@@ -520,7 +538,7 @@ export function GridChart({ item, pairs, total, big }: { item: Item; pairs: [num
         })}
       </svg>
       <figcaption class="muted tiny">
-        Average of {plural(total, "answer")}, on a {min}–{max} scale.
+        {t("Average of {answers}, on a {min}–{max} scale.", { answers: plural(total, "answer"), min, max })}
       </figcaption>
     </figure>
   );
@@ -535,7 +553,7 @@ export function PinMap({ src, pins, big, mine }: { src: string; pins: [number, n
         {pins.map(([x, y], i) => (
           <i key={i} class="pin-dot" style={{ left: `${x * 100}%`, top: `${y * 100}%` }} />
         ))}
-        {mine && <i class="pin-dot mine" style={{ left: `${mine[0] * 100}%`, top: `${mine[1] * 100}%` }} aria-label="Your pin" />}
+        {mine && <i class="pin-dot mine" style={{ left: `${mine[0] * 100}%`, top: `${mine[1] * 100}%` }} aria-label={t("Your pin")} />}
       </div>
       <figcaption class="muted tiny">{plural(pins.length, "pin")}</figcaption>
     </figure>
@@ -567,6 +585,9 @@ export function QuestionLabels({ q, labels }: { q: Question; labels: Label[] }) 
   );
 }
 
+/** The server signs staff replies "Host" or "Moderator" when they have no name; show that in the reader's language. */
+const replyName = (r: Reply) => (r.official && r.name === "Host" ? t("Host") : r.official && r.name === "Moderator" ? t("Moderator") : r.name || t("Anonymous"));
+
 export function Replies({ replies, canDelete, onDelete }: { replies: Reply[]; canDelete?: (r: Reply) => boolean; onDelete?: (r: Reply) => void }) {
   if (!replies.length) return null;
   return (
@@ -574,12 +595,12 @@ export function Replies({ replies, canDelete, onDelete }: { replies: Reply[]; ca
       {replies.map((r) => (
         <li key={r.id} class={r.official ? "official" : ""}>
           <div class="reply-meta">
-            <b>{r.name || "Anonymous"}</b>
-            {r.official && <span class="tag answered">Official reply</span>}
+            <b>{replyName(r)}</b>
+            {r.official && <span class="tag answered">{t("Official reply")}</span>}
             <span>{ago(r.ts)}</span>
             {canDelete?.(r) && (
-              <button class="btn sm quiet" onClick={() => onDelete?.(r)} aria-label="Delete reply">
-                Delete
+              <button class="btn sm quiet" onClick={() => onDelete?.(r)} aria-label={t("Delete reply")}>
+                {t("Delete")}
               </button>
             )}
           </div>
@@ -594,8 +615,8 @@ export function Replies({ replies, canDelete, onDelete }: { replies: Reply[]; ca
 export function whenText(ts: number): string {
   const d = new Date(ts);
   const sameDay = d.toDateString() === new Date().toDateString();
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return sameDay ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+  const time = d.toLocaleTimeString(lang, { hour: "numeric", minute: "2-digit" });
+  return sameDay ? time : `${d.toLocaleDateString(lang, { month: "short", day: "numeric" })}, ${time}`;
 }
 
 /** QR code as an SVG. The QR library loads only when one is shown. */
@@ -612,5 +633,5 @@ export function QrCode({ url }: { url: string }) {
       })
       .catch(() => setSvg(""));
   }, [url]);
-  return svg ? <div class="qr" dangerouslySetInnerHTML={{ __html: svg }} aria-label={`QR code for ${url}`} role="img" /> : null;
+  return svg ? <div class="qr" dangerouslySetInnerHTML={{ __html: svg }} aria-label={t("QR code for {url}", { url })} role="img" /> : null;
 }

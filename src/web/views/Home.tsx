@@ -1,7 +1,8 @@
 import { useState } from "preact/hooks";
 import { CFG, fetchEvent, navigate, normCode, rememberHosted, store, toast, useTheme, useTitle, type HostedEvent } from "../lib/util";
-import { Brand } from "../components/ui";
+import { Brand, LangPicker } from "../components/ui";
 import { TEMPLATES } from "../../shared/templates";
+import { t } from "../lib/i18n";
 
 export function Home() {
   useTitle(CFG.name);
@@ -15,8 +16,8 @@ export function Home() {
   const join = async (e: Event) => {
     e.preventDefault();
     const c = normCode(code);
-    if (!c) return toast("Type the event code");
-    if (!(await fetchEvent(c))) return toast(`No event found with code ${c}`);
+    if (!c) return toast(t("Type the event code"));
+    if (!(await fetchEvent(c))) return toast(t("No event found with code {code}", { code: c }));
     navigate(`/e/${c}`);
   };
 
@@ -30,7 +31,7 @@ export function Home() {
       rememberHosted({ code: d.code, key: d.hostKey, title: d.title, ts: Date.now() });
       navigate(`/host/${d.code}#${d.hostKey}`);
     } catch (err) {
-      toast((err as Error).message || "Could not create the event. Try again.");
+      toast((err as Error).message || t("Could not create the event. Try again."));
       setBusy(false);
     }
   };
@@ -49,9 +50,9 @@ export function Home() {
 
         <section>
           <form class="join-card" onSubmit={join}>
-            <h2>Join with a code</h2>
+            <h2>{t("Join with a code")}</h2>
             <label class="sr-only" for="code">
-              Event code
+              {t("Event code")}
             </label>
             <input
               id="code"
@@ -65,35 +66,35 @@ export function Home() {
               onInput={(e) => setCode(e.currentTarget.value)}
             />
             <button class="btn accent lg block" style={{ marginTop: 12 }}>
-              Join event
+              {t("Join event")}
             </button>
           </form>
 
           <form class="panel host-card stack" onSubmit={create}>
-            <h2>Host an event</h2>
+            <h2>{t("Host an event")}</h2>
             <label class="label" for="title">
-              Event name
+              {t("Event name")}
             </label>
             <input id="title" class="input" maxLength={120} placeholder={CFG.titlePlaceholder} value={title} onInput={(e) => setTitle(e.currentTarget.value)} style={{ marginTop: 0 }} />
             <label class="label" for="tpl">
-              Start with
+              {t("Start with")}
             </label>
             <select id="tpl" class="input" value={template} onChange={(e) => setTemplate(e.currentTarget.value)} style={{ marginTop: 0 }}>
-              <option value="">A blank event</option>
-              {TEMPLATES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}: {t.polls.length === 1 ? "1 ready-made poll" : `${t.polls.length} ready-made polls`}
+              <option value="">{t("A blank event")}</option>
+              {TEMPLATES.map((tpl) => (
+                <option key={tpl.id} value={tpl.id}>
+                  {tpl.name}: {tpl.polls.length === 1 ? t("1 ready-made poll") : t("{n} ready-made polls", { n: tpl.polls.length })}
                 </option>
               ))}
             </select>
-            {template && <p class="muted tiny">{TEMPLATES.find((t) => t.id === template)?.description}</p>}
+            {template && <p class="muted tiny">{TEMPLATES.find((tpl) => tpl.id === template)?.description}</p>}
             <button class="btn block" disabled={busy}>
-              {busy ? "Creating…" : "Create event"}
+              {busy ? t("Creating…") : t("Create event")}
             </button>
             {mine.length > 0 && (
               <div class="recent">
                 <p class="muted small" style={{ marginTop: 6 }}>
-                  Your recent events on this device
+                  {t("Your recent events on this device")}
                 </p>
                 <ul>
                   {mine.slice(0, 5).map((e) => (
@@ -101,7 +102,7 @@ export function Home() {
                       <span class="grow">{e.title}</span>
                       <span class="chip code">{e.code}</span>
                       <a class="btn sm ghost" href={`/host/${e.code}#${e.key}`}>
-                        Open
+                        {t("Open")}
                       </a>
                     </li>
                   ))}
@@ -112,10 +113,11 @@ export function Home() {
         </section>
       </main>
       <footer class="home-foot">
-        Free and open source under the MIT license.{" "}
+        {t("Free and open source under the MIT license.")}{" "}
         <a href="https://github.com/camster91/RSlide" target="_blank" rel="noopener">
-          Get the code
+          {t("Get the code")}
         </a>
+        <LangPicker label />
       </footer>
     </div>
   );

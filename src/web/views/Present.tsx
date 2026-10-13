@@ -3,6 +3,7 @@ import type { ComponentChildren } from "preact";
 import type { Poll, Snapshot } from "../../shared/protocol";
 import { activePoll, resultsOf, sortQuestions } from "../../shared/store";
 import { useRoom } from "../lib/room";
+import { t, tj } from "../lib/i18n";
 import { CFG, joinUrl, plural, useTheme, useTitle } from "../lib/util";
 import { Board, Brand, ConnProblem, Confetti, Countdown, Icon, Podium, QrCode, ResultsView, TYPE_LABEL, useFloaters } from "../components/ui";
 
@@ -36,7 +37,7 @@ export function Present({ code }: { code: string }) {
     stage = poll ? (
       <>
         <div class="stage-label">
-          <span class="tag live">{poll.type === "quiz" ? "Quiz" : "Live poll"}</span>
+          <span class="tag live">{poll.type === "quiz" ? t("Quiz") : t("Live poll")}</span>
           {poll.type !== "quiz" && <span>{TYPE_LABEL[poll.type]}</span>}
         </div>
         <div class={poll.type === "quiz" && !poll.revealed ? "split" : undefined}>
@@ -51,7 +52,7 @@ export function Present({ code }: { code: string }) {
       </>
     ) : (
       <div class="feature" style={{ marginTop: "18vh" }}>
-        No poll running right now.
+        {t("No poll running right now.")}
       </div>
     );
   } else if (s && mode === "leaderboard") {
@@ -59,16 +60,16 @@ export function Present({ code }: { code: string }) {
       <>
         <Confetti fire={s.leaderboard.rounds ? `lb-${s.leaderboard.rounds}` : null} />
         <div class="stage-label">
-          <Icon.trophy /> {plural(s.leaderboard.rounds, "question")} played
+          <Icon.trophy /> {t("{questions} played", { questions: plural(s.leaderboard.rounds, "question") })}
         </div>
-        <h1>Leaderboard</h1>
+        <h1>{t("Leaderboard")}</h1>
         {s.leaderboard.top.length ? (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr)", gap: "4vw", alignItems: "end" }}>
             <Podium board={s.leaderboard} />
             <Board board={s.leaderboard} from={3} />
           </div>
         ) : (
-          <div class="feature muted">Scores appear after the first answer is revealed.</div>
+          <div class="feature muted">{t("Scores appear after the first answer is revealed.")}</div>
         )}
       </>
     );
@@ -87,16 +88,16 @@ export function Present({ code }: { code: string }) {
         </div>
         {hl && (
           <div class="now-answering" style={{ marginTop: "2vh" }}>
-            <span class="tag hl">Now answering</span>
+            <span class="tag hl">{t("Now answering")}</span>
             <div class="feature" style={{ fontSize: "clamp(1.8rem, 3.2vw, 3.8rem)", marginTop: "1.5vh" }}>
               {hl.text}
             </div>
             <div class="meta">
-              {hl.name || "Anonymous"}, {plural(hl.votes - hl.downs, "vote")}
+              {hl.name || t("Anonymous")}, {plural(hl.votes - hl.downs, "vote")}
             </div>
           </div>
         )}
-        {!hl && <h1>Questions</h1>}
+        {!hl && <h1>{t("Questions")}</h1>}
         <div class="q-list">
           {rest.map((q) => (
             <div class="q" key={q.id}>
@@ -106,14 +107,14 @@ export function Present({ code }: { code: string }) {
               </div>
               <div class="body">
                 <div class="text">{q.text}</div>
-                <div class="meta">{q.name || "Anonymous"}</div>
+                <div class="meta">{q.name || t("Anonymous")}</div>
               </div>
             </div>
           ))}
         </div>
         {!rest.length && !hl && (
           <div class="feature muted" style={{ marginTop: "8vh", maxWidth: "18ch" }}>
-            Ask a question at {host}
+            {t("Ask a question at {host}", { host })}
           </div>
         )}
       </>
@@ -123,7 +124,7 @@ export function Present({ code }: { code: string }) {
       <div style={{ marginTop: "16vh" }}>
         <div class="stage-label">{s?.meta.title}</div>
         <div class="feature" style={{ marginTop: "2vh", maxWidth: "16ch" }}>
-          Join at {host} and enter <span style={{ color: "var(--brand)" }}>{code}</span>
+          {tj("Join at {host} and enter {code}", { host, code: <span style={{ color: "var(--brand)" }}>{code}</span> })}
         </div>
       </div>
     );
@@ -134,18 +135,18 @@ export function Present({ code }: { code: string }) {
       <aside>
         <Brand logo={s?.meta.settings.logo} code={code} />
         <div>
-          <div class="join-at">Join at</div>
+          <div class="join-at">{t("Join at")}</div>
           <div class="join-host">{host}</div>
         </div>
         <div>
-          <div class="join-at">Code</div>
-          <div class="big-code" aria-label={`Event code ${code.split("").join(" ")}`}>
+          <div class="join-at">{t("Code")}</div>
+          <div class="big-code" aria-label={t("Event code {code}", { code: code.split("").join(" ") })}>
             {code}
           </div>
         </div>
         <QrCode url={joinUrl(code)} />
         <div class="people num">
-          {s?.online ?? 0} {(s?.online ?? 0) === 1 ? "person" : "people"} here
+          {t("{people} here", { people: plural(s?.online ?? 0, "person") })}
         </div>
       </aside>
       <main aria-live="polite">{stage}</main>
@@ -165,7 +166,7 @@ function QuizWaiting({ count, options }: { count: number; options: string[] }) {
         ))}
       </div>
       <p class="muted" style={{ fontSize: "clamp(1rem, 1.5vw, 1.7rem)", marginTop: "3vh" }}>
-        {plural(count, "answer")} so far
+        {t("{answers} so far", { answers: plural(count, "answer") })}
       </p>
     </div>
   );
@@ -188,12 +189,12 @@ function Overlay({ code, s, poll, mode, room, clockOffset, floaters }: {
     card = (
       <div class="ov-card">
         <div class="ov-kicker">
-          <span class="tag live">{poll.type === "quiz" ? "Quiz" : "Live poll"}</span>
+          <span class="tag live">{poll.type === "quiz" ? t("Quiz") : t("Live poll")}</span>
           {poll.type === "quiz" && !poll.revealed && <Countdown poll={poll} clockOffset={clockOffset} />}
         </div>
         <h2 class="ov-title">{poll.title}</h2>
         {poll.type === "quiz" && !poll.revealed ? (
-          <p class="muted">{plural(resultsOf(s, poll.id).total, "answer")} so far</p>
+          <p class="muted">{t("{answers} so far", { answers: plural(resultsOf(s, poll.id).total, "answer") })}</p>
         ) : (
           <ResultsView poll={poll} results={resultsOf(s, poll.id)} code={code} />
         )}
@@ -203,7 +204,7 @@ function Overlay({ code, s, poll, mode, room, clockOffset, floaters }: {
     card = (
       <div class="ov-card">
         <div class="ov-kicker">
-          <Icon.trophy /> Leaderboard
+          <Icon.trophy /> {t("Leaderboard")}
         </div>
         <Board board={s.leaderboard} limit={5} />
       </div>
@@ -212,9 +213,9 @@ function Overlay({ code, s, poll, mode, room, clockOffset, floaters }: {
     card = (
       <div class="ov-card ov-question">
         <div class="ov-kicker">
-          <span class="tag hl">Question</span>
+          <span class="tag hl">{t("Question")}</span>
           <span class="muted small">
-            {hl.name || "Anonymous"} · {plural(hl.votes - hl.downs, "vote")}
+            {hl.name || t("Anonymous")} · {plural(hl.votes - hl.downs, "vote")}
           </span>
         </div>
         <div class="ov-title">{hl.text}</div>
@@ -225,7 +226,7 @@ function Overlay({ code, s, poll, mode, room, clockOffset, floaters }: {
     <div class={`overlay ${side}`} aria-live="polite">
       {card}
       <div class="ov-join">
-        Join at <b>{location.host}</b> · code <b class="ov-code">{code}</b>
+        {tj("Join at {host} · code {code}", { host: <b>{location.host}</b>, code: <b class="ov-code">{code}</b> })}
       </div>
       {floaters}
     </div>

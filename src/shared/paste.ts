@@ -10,22 +10,23 @@
 // Questions are split by blank lines, or by a new line ending in "?" after a list of options.
 import { LIMITS, type PollDraft, type PollType } from "./protocol";
 
+// English, French and Spanish hints, so translated examples work too.
 const HINTS: [RegExp, PollType | "multi"][] = [
-  [/^(rating|stars?)$/i, "rating"],
-  [/^(scale|slider|1\s*-\s*10|1\s*to\s*10)$/i, "scale"],
-  [/^(word ?cloud|words?|one word)$/i, "wordcloud"],
-  [/^(open|open text|text|free text|comment)$/i, "open"],
-  [/^(rank|ranking|order)$/i, "ranking"],
-  [/^(quiz)$/i, "quiz"],
-  [/^(100 points|points)$/i, "points"],
-  [/^(multiple|multi|pick several|choose several|select all|several)$/i, "multi"],
-  [/^(poll|choice|multiple choice|pick one|single)$/i, "multiple"],
+  [/^(rating|stars?|note|étoiles?|etoiles?|valoraci[oó]n|estrellas?)$/i, "rating"],
+  [/^(scale|slider|1\s*-\s*10|1\s*(to|à|a)\s*10|[ée]chelle|escala)$/i, "scale"],
+  [/^(word ?cloud|words?|one word|nuage de mots|mots?|nube de palabras|palabras?)$/i, "wordcloud"],
+  [/^(open|open text|text|free text|comment|ouverte|texte libre|texte|abierta|texto libre|texto)$/i, "open"],
+  [/^(rank|ranking|order|classement|ordre|clasificaci[oó]n|orden)$/i, "ranking"],
+  [/^(quiz|cuestionario)$/i, "quiz"],
+  [/^(100 points|points|100 puntos|puntos)$/i, "points"],
+  [/^(multiple|multi|pick several|choose several|select all|several|plusieurs|choix multiples?|varias|varios|selecci[oó]n m[uú]ltiple)$/i, "multi"],
+  [/^(poll|choice|multiple choice|pick one|single|sondage|choix|un choix|encuesta|opci[oó]n|una opci[oó]n)$/i, "multiple"],
 ];
 
 const NUMBERED = /^\s*(?:q(?:uestion)?\s*\d*\s*[:.)-]|\d{1,2}\s*[.)]|\d{1,2}\s*-\s)\s*/i;
 const BULLET = /^\s*(?:[-*•–·]|\[\s?[xX✓]?\s?\]|[a-jA-J]\s*[.)]|\d{1,2}\s*[.)])\s+/;
 const CHECKED = /^\s*\[\s?[xX✓]\s?\]/;
-const CORRECT_END = /\s*(?:\*|✓|✔|\((?:correct|answer|right)\)|\[(?:correct|answer)\])\s*$/i;
+const CORRECT_END = /\s*(?:\*|✓|✔|\((?:correct|answer|right|bonne réponse|correcte?|correcta|respuesta)\)|\[(?:correct|answer)\])\s*$/i;
 
 export interface PasteResult {
   polls: PollDraft[];
@@ -107,7 +108,7 @@ function parseBlock(lines: string[], notes: string[]): PollDraft | null {
   const lower = title.toLowerCase();
   let type: PollType = "open";
   if (hint === "rating" || hint === "scale" || hint === "wordcloud" || hint === "open") type = hint;
-  else if (/\b(one|single|few|three|3) words?\b|\bin a word\b/.test(lower)) type = "wordcloud";
+  else if (/\b(one|single|few|three|3) words?\b|\bin a word\b|\b(un|en un|quelques) mots?\b|\b(una|en una|pocas) palabras?\b/.test(lower)) type = "wordcloud";
   else if (/\bon a scale\b|\bscale of\b|\b1\s*(?:-|to)\s*10\b/.test(lower)) type = "scale";
   else if (/^(how would you )?rate\b|\brate (this|the|our|your)\b|\bhow (satisfied|happy|likely|useful|clear)\b/.test(lower)) type = "rating";
   const draft: PollDraft = { ...base, options: [], type };
