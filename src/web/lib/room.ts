@@ -1,3 +1,4 @@
+import { haptic } from "./native";
 import { useCallback, useEffect, useReducer, useRef, useState } from "preact/hooks";
 import { CLOSE, PING, type ClientMsg, type Reaction, type Role, type ServerMsg } from "../../shared/protocol";
 import { emptyRoom, reduce, type RoomState } from "../../shared/store";
@@ -83,6 +84,7 @@ export function useRoom(code: string, role: Role, opts: Options = {}) {
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
+      if (msg.type === "vote" || msg.type === "respond" || msg.type === "react") haptic();
       return true;
     }
     if (msg.type !== "react" && outbox.current.length < 50) outbox.current.push(JSON.stringify(msg));

@@ -1,0 +1,31 @@
+{
+  "name": "rslide-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "RSlide for iPhone, iPad and Android: a native shell around your RSlide site, with QR scanning, haptics and app links.",
+  "scripts": {
+    "sync": "node scripts/configure.mjs && cap sync",
+    "assets": "capacitor-assets generate --iconBackgroundColor '#3b3fd8' --iconBackgroundColorDark '#3b3fd8' --splashBackgroundColor '#3b3fd8' --splashBackgroundColorDark '#0f1030'",
+    "android": "npm run sync && cd android && ./gradlew assembleDebug",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "^8.2.1",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/share": "^8.0.3",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.3",
+    "typescript": "^7.0.2"
+  }
+}

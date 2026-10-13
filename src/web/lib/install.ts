@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { isNative } from "./native";
 
 // Chrome, Edge and Android fire this when the app can be installed. We keep it for our own "Install" button.
 interface InstallEvent extends Event {
@@ -30,7 +31,7 @@ export function useInstall(): { kind: "prompt" | "ios" | null; install: () => Pr
     subs.add(f);
     return () => void subs.delete(f);
   }, []);
-  const kind = standalone() ? null : deferred ? "prompt" : isIos() ? "ios" : null;
+  const kind = standalone() || isNative() ? null : deferred ? "prompt" : isIos() ? "ios" : null;
   return {
     kind,
     install: async () => {

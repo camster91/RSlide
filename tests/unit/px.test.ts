@@ -13,3 +13,14 @@ describe("inline style numbers", () => {
     expect((h(C, { style: { width: 5 } } as any).props as any).style.width).toBe(5);
   });
 });
+
+import { codeFromScan } from "../../src/web/lib/native";
+describe("codeFromScan", () => {
+  it("finds the event code in what a QR code holds", () => {
+    expect(codeFromScan("https://rslide.app/e/abc123")).toBe("ABC123");
+    expect(codeFromScan("https://rslide.app/ABC123")).toBe("ABC123");
+    expect(codeFromScan(" xyz789 ")).toBe("XYZ789");
+    expect(codeFromScan("https://rslide.app/host/ABC123")).toBeNull();
+    expect(codeFromScan("WIFI:S:home;T:WPA;P:secret;;")).toBeNull();
+  });
+});

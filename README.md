@@ -11,6 +11,7 @@
 - Small and fast: the attendee app is under 20 KB zipped
 - Easy to white-label: one config file, plus brand colours and fonts per event or per team
 - Installable on phones and computers (it's a web app: no app store needed)
+- **iPhone and Android apps** (optional) with QR scanning to join, app links and haptics: see [docs/MOBILE.md](docs/MOBILE.md)
 
 > RSlide is an independent project. It is not affiliated with or endorsed by Slido or Cisco.
 
@@ -204,7 +205,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for a deeper tour.
 See the full product plan in **[docs/ROADMAP.md](docs/ROADMAP.md)** — Slido Pro feature parity, design direction, architecture and release phases.
 
 Done: Slido Pro-level Q&A, polls, quizzes, moderation, analytics and exports (v0.1–v0.3); repeat-question merging, phone remote, stream overlay and website embed (v0.4); paste-to-polls and recap pages (v0.5); translations, team quizzes, API and webhooks, host accounts (v0.6–v0.9); and in v1.0: team workspaces with roles, single sign-on, insights across events, custom branding, self-paced mode, pictures on questions, the PowerPoint add-in, the Teams app, your own slides with live polls on top, an installable app, trust pages and optional paid plans.
-Next up: a native Zoom app, and app-store wrappers (see the roadmap).
+Next up: a native Zoom app (see the roadmap).
 
 Contributions welcome — read [CONTRIBUTING.md](CONTRIBUTING.md), pick any unchecked item and open an issue.
 

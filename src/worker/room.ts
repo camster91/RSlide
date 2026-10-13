@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import type { Workspace } from "./workspace";
 import type { SsoEnv } from "./sso";
 import { capacity, type BillingEnv, type Plan } from "./billing";
+import type { AppLinkEnv } from "./applinks";
 import type { HostAccount } from "./accounts";
 import type { MailEnv } from "./mail";
 import {
@@ -76,7 +77,7 @@ import { parsePolls, type PasteResult } from "../shared/paste";
 import { checkWebhookUrl, cleanWebhookEvents, newApiKey, newSecret, signWebhook, WEBHOOK_BATCH_MS, WEBHOOK_MAX_BATCH, WEBHOOK_TIMEOUT_MS } from "./api";
 import { DUPLICATE_SCORE, fingerprint, similarity, vectorScore, type Fingerprint } from "../shared/similar";
 
-export interface Env extends AiEnv, MailEnv, SsoEnv, BillingEnv {
+export interface Env extends AiEnv, MailEnv, SsoEnv, BillingEnv, AppLinkEnv {
   EVENTS: DurableObjectNamespace<EventRoom>;
   /** Optional host accounts (sign in by email link or single sign-on). */
   ACCOUNTS?: DurableObjectNamespace<HostAccount>;

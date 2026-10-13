@@ -969,6 +969,10 @@ const dict: Dict = {
     "no limit on people per event": "aucune limite de personnes par événement",
     "up to {n} people at once per event": "jusqu’à {n} personnes à la fois par événement",
     "Run one more event to see how they compare over time.": "Faites un événement de plus pour voir comment ils se comparent dans le temps.",
+    "Scan QR code": "Scanner le code QR",
+    "That QR code isn't an event code": "Ce code QR n’est pas un code d’événement",
+    "Couldn't open the camera": "Impossible d’ouvrir la caméra",
+    "Share join link": "Partager le lien",
   },
   plurals: {
     "answer": ["réponse", "réponses"],

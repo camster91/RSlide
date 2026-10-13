@@ -1,0 +1,1 @@
+{ "compilerOptions": { "module": "esnext", "moduleResolution": "bundler", "resolveJsonModule": true, "esModuleInterop": true, "strict": true, "target": "es2022", "skipLibCheck": true }, "include": ["capacitor.config.ts"] }

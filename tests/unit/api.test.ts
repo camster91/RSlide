@@ -93,3 +93,15 @@ describe("development sign-in links", () => {
     expect(devMode({}, "localhost")).toBe(false);
   });
 });
+
+import { wellKnown } from "../../src/worker/applinks";
+describe("app links", () => {
+  it("serves app link files only when set up", async () => {
+    expect(wellKnown("/.well-known/assetlinks.json", {})).toBeNull();
+    const a = await wellKnown("/.well-known/assetlinks.json", { ANDROID_PACKAGE: "app.rslide.mobile", ANDROID_CERT_SHA256: "AA:BB, CC:DD" })!.json();
+    expect(a[0].target).toEqual({ namespace: "android_app", package_name: "app.rslide.mobile", sha256_cert_fingerprints: ["AA:BB", "CC:DD"] });
+    const i = await wellKnown("/.well-known/apple-app-site-association", { APPLE_APP_IDS: "TEAM1.app.rslide.mobile" })!.json();
+    expect(i.applinks.details[0].appIDs).toEqual(["TEAM1.app.rslide.mobile"]);
+    expect(wellKnown("/.well-known/other", { APPLE_APP_IDS: "x" })).toBeNull();
+  });
+});

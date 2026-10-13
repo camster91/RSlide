@@ -271,7 +271,7 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 - [ ] LTI 1.3 for Canvas / Moodle / Brightspace
 - [x] Microsoft Teams app (tab, meeting side panel, meeting stage)
 - [ ] Native Zoom app (needs Zoom Marketplace review); Google Slides add-on
-- [ ] App-store wrappers (iOS / Android) around the installable app
+- [x] iPhone and Android apps (Capacitor): QR scan to join, app links, haptics, share sheet, offline screen; CI builds and store uploads
 - [ ] Self-host outside Cloudflare (Docker image)
 - [ ] Third-party accessibility audit and security review
 - [ ] 5,000+ attendee load test with fan-out

@@ -7,7 +7,7 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/.well-known/*"]
   },
   "durable_objects": {
     "bindings": [
@@ -48,6 +48,10 @@
     // Button label: "Sign in with …"
     "OIDC_NAME": "",
     // Only these email domains may sign in with SSO, e.g. "acme.com, acme.ca". Empty = any.
-    "OIDC_ALLOWED_DOMAINS": ""
+    "OIDC_ALLOWED_DOMAINS": "",
+    // Phone app links (optional, see docs/MOBILE.md): event links open in the app.
+    "ANDROID_PACKAGE": "",
+    "ANDROID_CERT_SHA256": "",
+    "APPLE_APP_IDS": ""
   }
 }

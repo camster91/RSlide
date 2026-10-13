@@ -26,6 +26,9 @@ const loaders: Record<string, () => Promise<{ default: Dict }>> = {
   .catch(() => setDict("en", null))
   .then(() => import("./app"));
 
+// Inside the RSlide phone app: QR scanning, haptics, and event links that open in the app.
+import("./lib/native").then((m) => m.setupNative());
+
 // Installable app: a small service worker so the app opens fast and can be added to the home screen.
-if (import.meta.env.PROD && "serviceWorker" in navigator && !document.documentElement.classList.contains("embedded"))
+if (import.meta.env.PROD && "serviceWorker" in navigator && !document.documentElement.classList.contains("embedded") && !(window as { Capacitor?: unknown }).Capacitor)
   addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));

@@ -31,6 +31,7 @@ import { useRoom, type Send } from "../lib/room";
 import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, store, toast, uploadImage, useTheme, useTitle } from "../lib/util";
 import { lang, t, tj } from "../lib/i18n";
 import { BrandEditor } from "../components/brand";
+import { isNative, shareLink } from "../lib/native";
 import { PollPicture, Board, ConnProblem, OfflineBanner, useDialog, Countdown, Empty, Icon, LabelChip, Podium, QrCode, TeamBoard, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
 
 type QTab = "live" | "pending" | "answered" | "archived";
@@ -236,8 +237,8 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
             </span>
           )}
           <span class="grow" />
-          <button class="btn sm ghost" onClick={() => copy(joinUrl(code), t("Join link copied"))}>
-            {t("Copy join link")}
+          <button class="btn sm ghost" onClick={() => (isNative() ? void shareLink({ title: s?.meta.title ?? "", url: joinUrl(code) }) : copy(joinUrl(code), t("Join link copied")))}>
+            {isNative() ? t("Share join link") : t("Copy join link")}
           </button>
           <button class="btn sm ghost" onClick={() => copy(location.href, t("Host link copied. Keep it private."))}>
             {t("Copy host link")}

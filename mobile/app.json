@@ -1,0 +1,6 @@
+{
+  "//": "Your RSlide site, and the app's store details. Change these, then run: npm run sync",
+  "url": "https://rslide.example.workers.dev",
+  "appId": "app.rslide.mobile",
+  "appName": "RSlide"
+}

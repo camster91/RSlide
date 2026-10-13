@@ -9,6 +9,7 @@ import { json, session } from "./http";
 import { accountRoutes } from "./accountRoutes";
 import { billingWebhook, workspaceRoutes } from "./workspaceRoutes";
 import { appRoutes } from "./apps";
+import { wellKnown } from "./applinks";
 
 export { EventRoom, HostAccount, Workspace };
 
@@ -21,6 +22,7 @@ export default {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean); // ["api", "events", CODE, action, ...]
 
+    if (parts[0] === ".well-known") return wellKnown(url.pathname, env) ?? new Response("Not found", { status: 404 });
     if (parts[0] !== "api") return env.ASSETS.fetch(request);
 
     // Public read-only API: /api/v1/events/CODE[/questions|/polls[/ID]|/leaderboard|/participants]

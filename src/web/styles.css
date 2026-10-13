@@ -1079,3 +1079,10 @@ h1.title { font-size: 1rem; margin: 0; font-family: inherit; letter-spacing: 0; 
 .legal-foot a, .home-links a { color: var(--muted); font-size: 0.85rem; }
 .status-box { display: grid; gap: 4px; padding: 16px 18px; border-radius: var(--r-item); border: 2px solid var(--ok); background: var(--ok-soft); }
 .status-box.bad { border-color: var(--danger); background: var(--danger-soft); }
+
+/* ---------- phone app ---------- */
+.scan-btn { background: transparent; color: var(--on-brand); border: 2px solid color-mix(in srgb, var(--on-brand) 70%, transparent); }
+@media (hover: hover) { .scan-btn:hover { background: color-mix(in srgb, var(--on-brand) 12%, transparent); } }
+/* The app has its own icon; no need to offer installing the website. */
+.native-app .install-tip { display: none; }
+.native-app .home-main > section:first-child { order: 2; }

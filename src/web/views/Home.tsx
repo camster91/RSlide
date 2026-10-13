@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import { CFG, fetchEvent, navigate, normCode, rememberHosted, store, toast, useTheme, useTitle, type HostedEvent } from "../lib/util";
 import { Brand, Icon, LangPicker } from "../components/ui";
 import { useInstall } from "../lib/install";
+import { canScan, scanForCode } from "../lib/native";
 import { TEMPLATES } from "../../shared/templates";
 import { t } from "../lib/i18n";
 import { useAccount } from "../lib/account";
@@ -27,6 +28,16 @@ export function Home() {
     if (!c) return toast(t("Type the event code"));
     if (!(await fetchEvent(c))) return toast(t("No event found with code {code}", { code: c }));
     navigate(`/e/${c}`);
+  };
+
+  const scan = async () => {
+    try {
+      const c = await scanForCode();
+      if (c) navigate(`/e/${c}`);
+      else if (c === null) toast(t("That QR code isn't an event code"));
+    } catch (e) {
+      if (!/cancel/i.test(String((e as Error).message))) toast(t("Couldn't open the camera"));
+    }
   };
 
   const create = async (e: Event) => {
@@ -96,6 +107,11 @@ export function Home() {
             <button class="btn accent lg block" style={{ marginTop: 12 }}>
               {t("Join event")}
             </button>
+            {canScan() && (
+              <button type="button" class="btn lg block scan-btn" style={{ marginTop: 10 }} onClick={scan}>
+                {t("Scan QR code")}
+              </button>
+            )}
           </form>
 
           <form class="panel host-card stack" onSubmit={create}>
