@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { PRESENT_MODES, type PresentMode } from "../../shared/protocol";
 import { activePoll, resultsOf, sortQuestions } from "../../shared/store";
 import { useRoom } from "../lib/room";
-import { CFG, plural, useTheme, useTitle } from "../lib/util";
-import { ConnDot, ConnProblem, Countdown, Empty, Icon, TYPE_LABEL } from "../components/ui";
+import { CFG, plural, toast, useTheme, useTitle } from "../lib/util";
+import { ConnDot, OfflineBanner, ConnProblem, Countdown, Empty, Icon, TYPE_LABEL } from "../components/ui";
 import { t, tj, pluralWord } from "../lib/i18n";
 
 const MODE_LABEL: Record<PresentMode, string> = { auto: t("Auto"), qa: t("Q&A"), poll: t("Poll"), leaderboard: t("Scores"), code: t("Join code") };
@@ -63,9 +63,19 @@ export function Remote({ code }: { code: string }) {
   const hl = questions.find((q) => q.highlighted);
   const top = questions.filter((q) => !q.highlighted).slice(0, 6);
   const pending = s.questions.filter((q) => q.status === "pending").length;
+  // In Auto mode a live poll wins the screen, so showing a question switches the screen to Q&A.
+  const showQuestion = (id: string) => {
+    send({ type: "highlight", id });
+    if (mode === "poll" || (mode === "auto" && live)) {
+      send({ type: "setPresentMode", mode: "qa" });
+      toast(t("Big screen switched to Q&A"));
+    }
+    if (navigator.vibrate) navigator.vibrate(15);
+  };
 
   return (
     <div class="remote">
+      <OfflineBanner status={status} />
       <header class="remote-head">
         <div class="grow" style={{ minWidth: 0 }}>
           <div class="remote-title">{s.meta.title}</div>
@@ -111,7 +121,7 @@ export function Remote({ code }: { code: string }) {
                 </button>
               ) : (
                 <button class={`btn ${live.showResults ? "on" : "ghost"}`} onClick={() => send({ type: "toggleResults", pollId: live.id })}>
-                  <Icon.eye /> {live.showResults ? t("Results shown") : t("Results hidden")}
+                  <Icon.eye /> {live.showResults ? t("Hide results") : t("Show results")}
                 </button>
               )}
               <button class="btn ghost" onClick={() => go(null)}>
@@ -129,10 +139,10 @@ export function Remote({ code }: { code: string }) {
         )}
         {polls.length > 0 && (
           <div class="remote-nav">
-            <button class="btn lg ghost" disabled={!prev} onClick={() => prev && go(prev.id)} aria-label={prev ? t("Previous poll: {title}", { title: prev.title }) : t("No previous poll")}>
+            <button class="btn lg ghost" disabled={!prev} onClick={() => prev && go(prev.id)} title={prev ? t("Previous poll: {title}", { title: prev.title }) : undefined}>
               <Icon.prev /> {t("Back")}
             </button>
-            <button class="btn lg accent" disabled={!next} onClick={() => next && go(next.id)} aria-label={next ? t("Next poll: {title}", { title: next.title }) : t("No next poll")}>
+            <button class="btn lg accent" disabled={!next} onClick={() => next && go(next.id)} title={next ? t("Next poll: {title}", { title: next.title }) : undefined}>
               {at < 0 ? t("Start") : t("Next")} <Icon.next />
             </button>
           </div>
@@ -161,7 +171,7 @@ export function Remote({ code }: { code: string }) {
         )}
         {top.length ? (
           top.map((q) => (
-            <button key={q.id} class="remote-q" onClick={() => send({ type: "highlight", id: q.id })} aria-label={t("Show on screen: {text}", { text: q.text })}>
+            <button key={q.id} class="remote-q" onClick={() => showQuestion(q.id)}>
               <span class="num remote-votes">
                 <Icon.up />
                 {q.votes - q.downs}

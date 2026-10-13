@@ -47,9 +47,9 @@ function Router() {
 }
 
 function Toast() {
-  const msg = useToast();
+  const { msg, show } = useToast();
   return (
-    <div id="toast" role="status" class={msg ? "show" : ""}>
+    <div id="toast" role="status" class={show ? "show" : ""} aria-hidden={!show}>
       {msg}
     </div>
   );

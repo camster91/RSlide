@@ -27,7 +27,7 @@ export function Recap({ code }: { code: string }) {
 
   const { stats } = d;
   return (
-    <div class="report recap">
+    <main class="report recap">
       <div class="spread no-print" style={{ marginBottom: 24 }}>
         <Brand logo={d.logo} code={code} />
         <button class="btn sm ghost" onClick={() => print()}>
@@ -110,7 +110,7 @@ export function Recap({ code }: { code: string }) {
             </div>
           )}
           <Podium board={d.leaderboard} />
-          <Board board={d.leaderboard} from={3} />
+          <Board board={d.leaderboard} afterPodium />
         </section>
       )}
 
@@ -126,6 +126,6 @@ export function Recap({ code }: { code: string }) {
       <div class="no-print" style={{ textAlign: "center", marginTop: 8 }}>
         <LangPicker label />
       </div>
-    </div>
+    </main>
   );
 }

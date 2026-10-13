@@ -5,7 +5,7 @@ import { findSimilar } from "../../shared/similar";
 import { useRoom, type Send } from "../lib/room";
 import { t, tj, lang } from "../lib/i18n";
 import { CFG, fetchEvent, mediaUrl, passcodeFor, plural, savePasscode, store, toast, useTheme, useTitle } from "../lib/util";
-import { Board, LabelChip, TeamBoard, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, PinMap, Podium, QuestionLabels, Replies, whenText, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
+import { Board, LabelChip, OfflineBanner, TeamBoard, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, PinMap, Podium, QuestionLabels, Replies, whenText, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
 
 type Tab = "qa" | "polls" | "board";
 
@@ -115,10 +115,15 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
   useTitle(s ? `${s.meta.title} · ${CFG.name}` : CFG.name);
 
   // Jump to the poll when the host launches one.
-  const lastPoll = useRef<string | null>(null);
+  const lastPoll = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     const id = s?.meta.activePollId ?? null;
-    if (id && id !== lastPoll.current) setTab("polls");
+    if (id && id !== lastPoll.current) {
+      // Don't pull people away while they're typing a question.
+      const typing = document.activeElement instanceof HTMLTextAreaElement || document.activeElement instanceof HTMLInputElement;
+      if (typing && lastPoll.current !== undefined) toast(t("A poll just started. Open Polls when you're ready."));
+      else setTab("polls");
+    }
     lastPoll.current = id;
   }, [s?.meta.activePollId]);
 
@@ -142,9 +147,16 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
         <ConnDot status={status} />
       </TopBar>
       <main class="wrap stack">
+        <OfflineBanner status={status} />
         {current === "qa" && <QATab s={s} me={me} send={send} />}
-        {current === "polls" && s.meta.teams.length > 0 && !me.team && <TeamPicker teams={s.meta.teams} board={s.leaderboard} send={send} quizLive={poll?.type === "quiz"} />}
-        {current === "polls" && (poll ? (poll.type === "quiz" && s.meta.teams.length > 0 && !me.team && !me.responses[poll.id] ? null : <PollAnswer key={poll.id} code={code} poll={poll} results={resultsOf(s, poll.id)} me={me} clockOffset={state.clockOffset} send={send} />) : <NoPoll />)}
+        {s.meta.recapPublic && (
+          <a class="notice recap-link" href={`/recap/${s.meta.code}`}>
+            {t("The host shared a recap of this event.")} <b>{t("See the recap")}</b>
+          </a>
+        )}
+        {current === "polls" && s.meta.teams.length > 0 && !me.team && poll?.type !== "quiz" && <TeamPicker teams={s.meta.teams} board={s.leaderboard} send={send} quizLive={false} />}
+        {current === "polls" && (poll ? (<PollAnswer key={poll.id} code={code} poll={poll} results={resultsOf(s, poll.id)} me={me} clockOffset={state.clockOffset} send={send} />) : <NoPoll />)}
+        {current === "polls" && s.meta.teams.length > 0 && !me.team && poll?.type === "quiz" && <TeamPicker teams={s.meta.teams} board={s.leaderboard} send={send} quizLive />}
         {current === "polls" && me.team && <MyTeam team={s.meta.teams.find((x) => x.id === me.team)} />}
         {current === "board" && <BoardTab s={s} me={me} />}
         {s.meta.settings.reactions && current !== "board" && <ReactBar send={send} />}
@@ -157,7 +169,7 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
         <button aria-current={current === "polls" ? "page" : undefined} onClick={() => setTab("polls")}>
           <Icon.chart />
           {t("Polls")}
-          {poll && current !== "polls" && <span class="pip" aria-label={t("A poll is live")} />}
+          {poll && current !== "polls" && <span class="pip" role="img" aria-label={t("A poll is live")} />}
         </button>
         {showBoard && (
           <button aria-current={current === "board" ? "page" : undefined} onClick={() => setTab("board")}>
@@ -176,7 +188,7 @@ function TeamPicker({ teams, board, send, quizLive }: { teams: Label[]; board: L
   return (
     <div class="poll-card team-pick">
       <h2>{t("Pick your team")}</h2>
-      <p class="muted small">{quizLive ? t("A quiz is on. Pick a team to play.") : t("Quizzes in this event are played in teams.")}</p>
+      <p class="muted small">{quizLive ? t("Answer first if you like: you'll join the smallest team. Or pick one now.") : t("Quizzes in this event are played in teams.")}</p>
       <div class="teams">
         {teams.map((x) => (
           <button key={x.id} class={`team-btn c-${x.color}`} onClick={() => send({ type: "joinTeam", team: x.id })}>
@@ -213,9 +225,27 @@ function NoPoll() {
 
 // ---------- Q&A ----------
 
+let askDraft = "";
+
+/** Arrow keys move between the buttons in a group (stars, scale), like a radio group. */
+function arrowKeys(e: KeyboardEvent) {
+  const dir = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+  if (!dir) return;
+  const btns = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+  const i = btns.indexOf(document.activeElement as HTMLButtonElement);
+  if (i < 0) return;
+  e.preventDefault();
+  btns[(i + dir + btns.length) % btns.length].focus();
+}
+
 function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["state"]["snapshot"]>; me: NonNullable<ReturnType<typeof useRoom>["state"]["me"]>; send: Send }) {
   const [sort, setSort] = useState<"popular" | "recent">("popular");
-  const [text, setText] = useState("");
+  const [text, setTextState] = useState(askDraft);
+  // Kept outside the component, so switching tabs (e.g. when a poll starts) doesn't lose it.
+  const setText = (v: string) => {
+    askDraft = v;
+    setTextState(v);
+  };
   const [name, setName] = useState(() => me.name || store.get("rs.name", ""));
   const settings = s.meta.settings;
   const named = settings.identity !== "none";
@@ -231,8 +261,26 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
     store.set(`rs.room.${s.meta.code}`, id);
   };
   const inRoom = rooms.length > 1 ? s.questions.filter((q) => q.room === roomId) : s.questions;
-  const questions = sortQuestions(inRoom, sort);
+  // Your own questions that wait for approval stay at the top, so you can see they arrived.
+  const sorted = sortQuestions(inRoom, sort);
+  const questions = [...sorted.filter((q) => q.status === "pending"), ...sorted.filter((q) => q.status !== "pending")];
   const visible = questions.filter((q) => q.status !== "pending").length;
+  const waiting = questions.length - visible;
+  // After you ask, scroll to your new question and make it flash once.
+  const myCount = useRef(me.questions.length);
+  useEffect(() => {
+    if (me.questions.length > myCount.current) {
+      const id = me.questions[me.questions.length - 1];
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`q-${id}`);
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("flash");
+        setTimeout(() => el.classList.remove("flash"), 1600);
+      });
+    }
+    myCount.current = me.questions.length;
+  }, [me.questions.length]);
   // "Already asked?" — similar questions others asked, so people upvote instead of repeating.
   const typed = useDebounced(text, 300);
   const similar = useMemo(
@@ -245,9 +293,9 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
     const msg = text.trim();
     if (!msg) return toast(t("Type your question first"));
     if (!named) store.set("rs.name", name.trim());
-    send({ type: "ask", text: msg, name: named ? undefined : name.trim(), room: roomId });
+    const now = send({ type: "ask", text: msg, name: named ? undefined : name.trim(), room: roomId });
     setText("");
-    toast(settings.moderation ? t("Sent. The host will review it soon.") : t("Question sent"));
+    if (now) toast(settings.moderation ? t("Sent. The host will review it soon.") : t("Question sent"));
   };
 
   return (
@@ -262,13 +310,11 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
           ))}
         </div>
       )}
-      {s.meta.recapPublic && (
-        <a class="notice recap-link" href={`/recap/${s.meta.code}`}>
-          {t("The host shared a recap of this event.")} <b>{t("See the recap")}</b>
-        </a>
-      )}
       {!settings.qaOpen && settings.qaOpensAt && <p class="notice">{t("Questions open at {time}.", { time: whenText(settings.qaOpensAt) })}</p>}
       {settings.qaOpen && settings.qaClosesAt && <p class="notice">{t("Questions close at {time}.", { time: whenText(settings.qaClosesAt) })}</p>}
+      {!settings.qaOpen ? (
+        <p class="notice">{t("Questions are closed right now. You can still vote on the ones below.")}</p>
+      ) : (
       <form class="ask" onSubmit={ask}>
         <label class="sr-only" for="qtext">
           {t("Your question")}
@@ -277,8 +323,7 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
           id="qtext"
           class="input"
           maxLength={300}
-          placeholder={settings.qaOpen ? t("Ask the speaker a question") : t("Questions are closed for now")}
-          disabled={!settings.qaOpen}
+          placeholder={rooms.length > 1 ? t("Ask a question in {room}", { room: rooms.find((r) => r.id === roomId)?.name ?? "" }) : t("Ask the speaker a question")}
           value={text}
           onInput={(e) => setText(e.currentTarget.value)}
         />
@@ -291,12 +336,11 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
               maxLength={40}
               aria-label={t("Your name")}
               placeholder={settings.allowAnonymous ? t("Your name (optional)") : t("Your name")}
-              disabled={!settings.qaOpen}
               value={name}
               onInput={(e) => setName(e.currentTarget.value)}
             />
           )}
-          <button class="btn accent" disabled={!settings.qaOpen || !text.trim()}>
+          <button class="btn accent" disabled={!text.trim()}>
             {t("Send")}
           </button>
         </div>
@@ -314,21 +358,24 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
                   class={`btn sm ${ups.has(q.id) ? "on" : "ghost"}`}
                   aria-pressed={ups.has(q.id)}
                   onClick={() => {
-                    if (!ups.has(q.id)) send({ type: "vote", id: q.id, dir: 1 });
+                    if (!ups.has(q.id) && send({ type: "vote", id: q.id, dir: 1 })) toast(t("Upvoted. Thanks!"));
                     setText("");
-                    toast(t("Upvoted. Thanks!"));
                   }}
                 >
-                  <Icon.up /> {q.votes - q.downs}
+                  <Icon.up /> {t("Upvote ({n})", { n: q.votes - q.downs })}
                 </button>
               </div>
             ))}
           </div>
         )}
       </form>
+      )}
 
       <div class="spread">
-        <b>{plural(visible, "question")}</b>
+        <b>
+          {plural(visible, "question")}
+          {waiting > 0 && <span class="muted small"> · {t("{n} of yours waiting for approval", { n: waiting })}</span>}
+        </b>
         <div class="seg" role="group" aria-label={t("Sort questions")}>
           {(["popular", "recent"] as const).map((m) => (
             <button key={m} aria-pressed={sort === m} onClick={() => setSort(m)}>
@@ -349,7 +396,7 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
               mine={mine.has(q.id)}
               downvotes={settings.allowDownvotes}
               labels={s.meta.labels}
-              canReply={settings.audienceReplies && q.status !== "pending"}
+              canReply={settings.audienceReplies && q.status !== "pending" && !mine.has(q.id)}
               myReplies={myReplies}
               defaultName={named ? me.name : name}
               send={send}
@@ -392,7 +439,7 @@ function AttendeeQuestion({ q, up, down, mine, downvotes, labels, canReply, myRe
   const [draft, setDraft] = useState(q.text);
   const canEdit = mine && (q.status === "pending" || q.status === "live");
   return (
-    <article class={`q ${q.highlighted ? "hl" : ""} ${mine ? "mine" : ""}`}>
+    <article id={`q-${q.id}`} class={`q ${q.highlighted ? "hl" : ""} ${mine ? "mine" : ""}`}>
       <div class="body">
         {q.highlighted && (
           <span class="tag hl" style={{ marginBottom: 6 }}>
@@ -520,6 +567,7 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
     };
     return (
       <>
+        {item.multi && <p class="muted small hint">{t("Pick all that apply.")}</p>}
         <div class={`opts ${hasImages ? "images" : ""}`}>
           {item.options.map((o, i) => {
             const img = item.images?.[i];
@@ -534,14 +582,13 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
               >
                 {img && <img src={mediaUrl(code, img)} alt="" loading="lazy" />}
                 <span class={img ? "lbl" : "row nowrap"} style={img ? undefined : { gap: 12 }}>
-                  <span class="box" />
+                  {tiles ? <span class="tile-letter" aria-hidden="true">{String.fromCharCode(65 + i)}</span> : <span class="box" />}
                   <span>{o}</span>
                 </span>
               </button>
             );
           })}
         </div>
-        {item.multi && <p class="muted small" style={{ marginTop: 8 }}>{t("Pick all that apply.")}</p>}
       </>
     );
   }
@@ -552,6 +599,7 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
     const set = (i: number, n: number) => {
       // Never let one slider push the total past the budget.
       const others = used - vals[i];
+      if (n > POINTS_BUDGET - others && left === 0) toast(t("No points left. Lower another option first."));
       onChange(vals.map((v, j) => (j === i ? Math.max(0, Math.min(n, POINTS_BUDGET - others)) : v)));
     };
     return (
@@ -605,13 +653,35 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
       onChange(p as unknown as ResponseValue);
       onPick?.(p as unknown as ResponseValue);
     };
+    // Keyboard: arrows move the pin (Shift = bigger steps).
+    const key = (e: KeyboardEvent) => {
+      const d: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      const m = d[e.key];
+      if (!m || disabled) return;
+      e.preventDefault();
+      const step = e.shiftKey ? 0.1 : 0.02;
+      const cur = xy ?? [0.5, 0.5];
+      const clamp = (n: number) => Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000;
+      onChange([clamp(cur[0] + m[0] * step), clamp(cur[1] + m[1] * step)] as unknown as ResponseValue);
+    };
     return item.image ? (
       <div>
         <p class="muted small" style={{ marginBottom: 8 }}>
-          {t("Tap the picture to drop your pin. Tap again to move it.")}
+          {t("Tap the picture to place your pin, then press the button below.")}
         </p>
-        <div class="pin-wrap pin-tap" onClick={tap} role="button" aria-label={t("Picture to tap on")}>
-          <img src={mediaUrl(code, item.image)} alt="" />
+        <div
+          class="pin-wrap pin-tap"
+          onClick={tap}
+          onKeyDown={key}
+          tabIndex={disabled ? -1 : 0}
+          role="application"
+          aria-label={t("Picture to place your pin on. Use the arrow keys to move the pin.")}
+          aria-describedby="pin-pos"
+        >
+          <img src={mediaUrl(code, item.image)} alt={t("Picture to place your pin on")} />
+          <span id="pin-pos" class="sr-only" aria-live="polite">
+            {xy ? t("Pin at {x}% across, {y}% down", { x: Math.round(xy[0] * 100), y: Math.round(xy[1] * 100) }) : t("No pin yet")}
+          </span>
           {xy && <i class="pin-dot mine" style={{ left: `${xy[0] * 100}%`, top: `${xy[1] * 100}%` }} />}
         </div>
       </div>
@@ -620,7 +690,7 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
   if (item.type === "rating") {
     const v = typeof value === "number" ? value : 0;
     return (
-      <div class="stars" role="radiogroup" aria-label={t("Rating")}>
+      <div class="stars" role="radiogroup" aria-label={t("Rating")} onKeyDown={arrowKeys}>
         {Array.from({ length: item.scale || 5 }, (_, i) => (
           <button
             type="button"
@@ -646,14 +716,13 @@ function ItemInput({ item, code, value, onChange, tiles = false, disabled = fals
     const nums = Array.from({ length: r.max - r.min + 1 }, (_, i) => r.min + i);
     return (
       <div>
-        <div class="scale" role="radiogroup" aria-label={t("Scale")}>
+        <div class={`scale ${nums.length > 7 ? "many" : ""}`} role="radiogroup" aria-label={t("Scale")} onKeyDown={arrowKeys}>
           {nums.map((n) => (
             <button
               type="button"
               key={n}
               role="radio"
               aria-checked={value === n}
-              aria-pressed={value === n}
               disabled={disabled}
               onClick={() => {
                 onChange(n);
@@ -721,11 +790,8 @@ const ready = (item: Item, v: ResponseValue | null) => {
 
 /** Converts a draft value to what the server expects. */
 const toWire = (item: Item, v: ResponseValue | null): ResponseValue | null => {
-  if (item.type === "grid" && !Array.isArray(v)) {
-    const r = item.range ?? { min: 1, max: 10 };
-    const mid = Math.round((r.min + r.max) / 2);
-    return item.options.map(() => [mid, mid]) as [number, number][];
-  }
+  // A 2×2 grid needs at least one slider moved, so an untouched grid isn't sent as fake answers.
+  if (item.type === "grid" && !Array.isArray(v)) return null;
   if (!ready(item, v)) return item.type === "ranking" ? item.options.map((_, i) => i) : null;
   if (item.type === "wordcloud") return [String(v).trim()];
   if (item.type === "open") return String(v).trim();
@@ -743,19 +809,22 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
   const answered = mine !== null;
   const item = poll as unknown as Item;
   const freeText = poll.type === "wordcloud" || poll.type === "open";
-  const oneTap = poll.type === "rating" || poll.type === "scale" || poll.type === "pin" || (poll.type === "multiple" && !poll.multi);
-  const [draft, setDraft] = useState<ResponseValue | null>(freeText ? "" : mine);
+  const oneTap = poll.type === "rating" || poll.type === "scale" || (poll.type === "multiple" && !poll.multi);
+  // Free-text answers show what you sent, so you can see and change it (one answer per person).
+  const asText = (m: ResponseValue | null) => (Array.isArray(m) ? String(m[0] ?? "") : typeof m === "string" ? m : "");
+  const [draft, setDraft] = useState<ResponseValue | null>(freeText ? asText(mine) : mine);
   const [movingPin, setMovingPin] = useState(false);
   const pinDone = poll.type === "pin" && answered && !movingPin;
   useEffect(() => {
     if (!freeText) setDraft(mine);
+    else if (mine !== null) setDraft(asText(mine));
   }, [JSON.stringify(mine)]);
 
   const submit = (v = draft) => {
     const wire = toWire(item, v);
-    if (wire === null) return toast(freeText ? t("Type something first") : t("Pick an answer first"));
+    if (wire === null) return toast(freeText ? t("Type something first") : poll.type === "grid" ? t("Move the sliders to place each option") : poll.type === "pin" ? t("Tap the picture to place your pin") : t("Pick an answer first"));
     send({ type: "respond", pollId: poll.id, value: wire });
-    if (freeText) setDraft("");
+    if (poll.type === "pin") setMovingPin(false);
   };
 
   return (
@@ -765,32 +834,26 @@ function SimpleAnswer({ code, poll, results, mine, send }: { code: string; poll:
         <span class="muted small">{TYPE_LABEL[poll.type]}</span>
       </div>
       <h2>{poll.title}</h2>
+      {oneTap && !answered && <p class="muted small hint">{t("Tap an answer to vote. You can change it.")}</p>}
       {!pinDone && (
         <ItemInput
           item={item}
           code={code}
           value={draft}
           onChange={setDraft}
-          onPick={
-            oneTap
-              ? (v) => {
-                  submit(v);
-                  setMovingPin(false);
-                }
-              : undefined
-          }
+          onPick={oneTap ? (v) => submit(v) : undefined}
         />
       )}
-      {!oneTap && (
+      {!oneTap && !pinDone && (
         <div class="row" style={{ marginTop: 14 }}>
-          <button class="btn accent" onClick={() => submit()}>
-            {answered && !freeText ? t("Update answer") : t("Send")}
+          <button class="btn accent block lg" onClick={() => submit()}>
+            {poll.type === "pin" ? t("Drop my pin here") : answered ? t("Update answer") : t("Send")}
           </button>
         </div>
       )}
       {answered && (
-        <p class="muted small" style={{ marginTop: 10 }}>
-          ✓ {freeText ? t("Sent. You can send another.") : poll.type === "pin" ? t("Pin dropped.") : oneTap ? t("Answer saved. Tap again to change it.") : t("Answer saved.")}
+        <p class="saved-note small" role="status">
+          ✓ {freeText ? t("Answer saved. You can change it.") : poll.type === "pin" ? t("Pin dropped.") : oneTap ? t("Answer saved. Tap again to change it.") : t("Answer saved.")}
         </p>
       )}
       {answered && (
@@ -845,14 +908,18 @@ function QuizAnswer({ code, poll, results, mine, me, clockOffset, send }: { code
           </div>
           {me.quiz && (
             <p class="muted">
-              {tj("You're {rank} of {players} with {points}.", { rank: <b>#{me.quiz.rank}</b>, players: me.quiz.players.toLocaleString(lang), points: plural(me.quiz.points, "point") })}
+              {mine
+              ? tj("You're {rank} of {players} with {points}.", { rank: <b>#{me.quiz.rank}</b>, players: me.quiz.players.toLocaleString(lang), points: plural(me.quiz.points, "point") })
+              : tj("No answer this round. You're {rank} of {players} overall.", { rank: <b>#{me.quiz.rank}</b>, players: me.quiz.players.toLocaleString(lang) })}
             </p>
           )}
-          <ResultsView poll={poll} results={results} code={code} />
+          {mine && !right && poll.correct && (
+            <p class="muted small">{t("The right answer: {answer}", { answer: poll.correct.map((c) => poll.options[c]).join(", ") })}</p>
+          )}
+          <ResultsView poll={poll} results={results} code={code} mine={mine ?? undefined} />
         </div>
       ) : (
         <>
-          {!me.name && !locked && <Nickname send={send} />}
           <ItemInput item={poll as unknown as Item} code={code} value={draft} onChange={setDraft} tiles disabled={locked} onPick={!poll.multi ? (v) => submit(v) : undefined} />
           {poll.multi && !locked && (
             <button class="btn accent block" style={{ marginTop: 12 }} onClick={() => submit()}>
@@ -862,6 +929,8 @@ function QuizAnswer({ code, poll, results, mine, me, clockOffset, send }: { code
           <p class="muted" style={{ marginTop: 14, textAlign: "center" }}>
             {answered ? t("Answer locked in. Wait for the reveal…") : timeUp ? t("Time's up! Wait for the reveal…") : t("Faster correct answers score more points.")}
           </p>
+          {/* Asked after answering, so it never uses up quiz time. */}
+          {!me.name && answered && <Nickname send={send} />}
         </>
       )}
     </div>
@@ -956,7 +1025,7 @@ function SurveyAnswer({ code, poll, results, mine, send }: { code: string; poll:
 
 function BoardTab({ s, me }: { s: NonNullable<ReturnType<typeof useRoom>["state"]["snapshot"]>; me: NonNullable<ReturnType<typeof useRoom>["state"]["me"]> }) {
   const lb = s.leaderboard;
-  const beat = me.quiz && lb.players > 1 ? Math.round(((lb.players - me.quiz.rank) / (lb.players - 1)) * 100) : null;
+  const beat = me.quiz && lb.players >= 5 ? Math.round(((lb.players - me.quiz.rank) / (lb.players - 1)) * 100) : null;
   return (
     <>
       {me.quiz ? (
@@ -986,7 +1055,7 @@ function BoardTab({ s, me }: { s: NonNullable<ReturnType<typeof useRoom>["state"
           </>
         )}
         <Podium board={lb} />
-        <Board board={lb} from={3} teams={s.meta.teams} />
+        <Board board={lb} afterPodium teams={s.meta.teams} />
       </div>
     </>
   );

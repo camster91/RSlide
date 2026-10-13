@@ -1,3 +1,4 @@
+import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   ITEM_TYPES,
@@ -24,11 +25,11 @@ import {
 import { resultsOf, sortQuestions } from "../../shared/store";
 import { TEMPLATES } from "../../shared/templates";
 import { parsePolls, type PasteResult } from "../../shared/paste";
-import { saveToAccount } from "../lib/account";
+import { saveToAccount, useAccount } from "../lib/account";
 import { useRoom, type Send } from "../lib/room";
 import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, store, toast, uploadImage, useTheme, useTitle } from "../lib/util";
-import { t, tj } from "../lib/i18n";
-import { Board, ConnProblem, Countdown, Empty, Icon, LabelChip, Podium, QrCode, TeamBoard, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
+import { lang, t, tj } from "../lib/i18n";
+import { Board, ConnProblem, OfflineBanner, useDialog, Countdown, Empty, Icon, LabelChip, Podium, QrCode, TeamBoard, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
 
 type QTab = "live" | "pending" | "answered" | "archived";
 const Q_TABS: [QTab, string][] = [
@@ -99,6 +100,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   const tab = qTab === "pending" && !showReview ? "live" : qTab;
   const list = sortQuestions(by[tab], "popular");
   const byId = new Map((s?.questions ?? []).map((q) => [q.id, q]));
+  const livePoll = s?.polls.find((p) => p.status === "active");
   const act = (type: ModAction, id: string) => {
     if (type === "deleteQuestion" && !confirm(t("Delete this question for everyone?"))) return;
     send({ type, id });
@@ -146,6 +148,14 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
           </button>
         ))}
       </div>
+      {tab !== "pending" && by.pending.length > 0 && (
+        <div class="notice row" role="status">
+          <span class="grow">{t("{n} waiting for your review", { n: plural(by.pending.length, "question") })}</span>
+          <button class="btn sm" onClick={() => setQTab("pending")}>
+            {t("Review now")}
+          </button>
+        </div>
+      )}
       {list.length ? (
         <div class="q-list">
           {list.map((q) => (
@@ -162,6 +172,9 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
     return (
       <>
         <TopBar title={s ? t("Moderating: {title}", { title: s.meta.title }) : t("Connecting…")} logo={settings?.logo} code={code}>
+          <span class="chip code" title={t("Event code")}>
+            {code}
+          </span>
           <span class="chip">
             <span class={`dot ${status === "online" ? "" : "off"}`} />
             {tj("{n} online", { n: <span class="num">{s?.online ?? 0}</span> })}
@@ -176,7 +189,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
 
   return (
     <>
-      <TopBar title={s?.meta.title} logo={settings?.logo} code={code}>
+      <TopBar host title={s?.meta.title} logo={settings?.logo} code={code}>
         <span class="chip" title={t("Attendees connected now")}>
           <span class={`dot ${status === "online" ? "" : "off"}`} />
           {tj("{n} online", { n: <span class="num">{s?.online ?? 0}</span> })}
@@ -194,6 +207,8 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
       </TopBar>
 
       <main class="wrap wide stack">
+        <OfflineBanner status={status} />
+        <NewEventTip code={code} />
         <input
           class="title-input"
           maxLength={120}
@@ -243,6 +258,18 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
                   {t("New poll")}
                 </button>
               </div>
+              {livePoll && (
+                <div class="live-strip" role="status">
+                  <span class="tag live">{t("Live now")}</span>
+                  <a class="grow" href={`#poll-${livePoll.id}`}>
+                    {livePoll.title}
+                  </a>
+                  <span class="muted small num">{plural(resultsOf(s!, livePoll.id).total, "response")}</span>
+                  <button class="btn sm" onClick={() => send({ type: "closePoll", pollId: livePoll.id })}>
+                    {t("Close poll")}
+                  </button>
+                </div>
+              )}
               {editing && (
                 <PollEditor
                   key={editing.id ?? "new"}
@@ -269,6 +296,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
                       clockOffset={state.clockOffset}
                       send={send}
                       onEdit={() => setEditing(toDraft(p))}
+                      liveTitle={livePoll && livePoll.id !== p.id ? livePoll.title : undefined}
                     />
                   ))}
                 </div>
@@ -305,7 +333,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
                 </div>
                 {s.leaderboard.teams && s.leaderboard.teams.length > 0 && <TeamBoard teams={s.leaderboard.teams} />}
                 <Podium board={s.leaderboard} />
-                <Board board={s.leaderboard} from={3} teams={s.meta.teams} />
+                <Board board={s.leaderboard} afterPodium teams={s.meta.teams} />
               </div>
             )}
 
@@ -339,6 +367,48 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   );
 }
 
+// ---------- first-time tip ----------
+
+/** Right after creating an event: the host link is the only way back, unless you sign in. */
+function NewEventTip({ code }: { code: string }) {
+  const acct = useAccount();
+  const [open, setOpen] = useState(() => {
+    try {
+      return sessionStorage.getItem("rs.new") === code;
+    } catch {
+      return false;
+    }
+  });
+  if (!open || acct.loading || acct.email) return null;
+  const close = () => {
+    try {
+      sessionStorage.removeItem("rs.new");
+    } catch {}
+    setOpen(false);
+  };
+  return (
+    <div class="tip" role="note">
+      <div class="grow">
+        <b>{t("This is your private host page.")}</b>{" "}
+        {acct.on ? t("Save this link to get back here, or sign in to keep all your events in one place.") : t("Save this link: it's the only way back here. Anyone with it can run your event.")}
+      </div>
+      <div class="row">
+        <button class="btn sm" onClick={() => (copy(location.href, t("Host link copied. Keep it private.")), close())}>
+          {t("Copy host link")}
+        </button>
+        {acct.on && (
+          <a class="btn sm ghost" href="/signin">
+            {t("Sign in")}
+          </a>
+        )}
+        <button class="btn sm quiet" onClick={close} aria-label={t("Dismiss")}>
+          <Icon.x />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------- export ----------
 
 function ExportMenu({ code, hostKey, onRecap }: { code: string; hostKey: string; onRecap: () => void }) {
@@ -348,8 +418,13 @@ function ExportMenu({ code, hostKey, onRecap }: { code: string; hostKey: string;
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("keydown", esc);
+    };
   }, [open]);
   const k = encodeURIComponent(hostKey);
   const duplicate = async () => {
@@ -410,11 +485,7 @@ function ExportMenu({ code, hostKey, onRecap }: { code: string; hostKey: string;
 function RecapModal({ code, hostKey, meta, send, onClose }: { code: string; hostKey: string; meta: Meta; send: Send; onClose: () => void }) {
   const [summary, setSummary] = useState(meta.recapSummary ?? "");
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, []);
+  const dialog = useDialog<HTMLDivElement>(onClose);
   const url = `${location.origin}/recap/${code}`;
   const saved = summary.trim() === (meta.recapSummary ?? "");
   const write = async () => {
@@ -433,7 +504,7 @@ function RecapModal({ code, hostKey, meta, send, onClose }: { code: string; host
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
-      <div class="modal recap-modal" role="dialog" aria-modal="true" aria-label={t("Recap page")}>
+      <div ref={dialog} tabIndex={-1} class="modal recap-modal" role="dialog" aria-modal="true" aria-label={t("Recap page")}>
         <div class="spread">
           <h2>{t("Recap page")}</h2>
           <button class="btn sm quiet" onClick={onClose} aria-label={t("Close")}>
@@ -477,7 +548,7 @@ function RecapModal({ code, hostKey, meta, send, onClose }: { code: string; host
         />
         <div class="row">
           <button class="btn sm" disabled={saved} onClick={() => send({ type: "setRecap", summary })}>
-            {saved ? t("Saved") : t("Save summary")}
+            {saved && summary.trim() ? t("Saved") : t("Save summary")}
           </button>
           {meta.ai && (
             <button class="btn sm ghost" disabled={busy} onClick={write} title={t("Uses Workers AI on your Cloudflare account")}>
@@ -494,16 +565,12 @@ function RecapModal({ code, hostKey, meta, send, onClose }: { code: string; host
 // ---------- phone remote ----------
 
 function RemoteModal({ code, hostKey, onClose }: { code: string; hostKey: string; onClose: () => void }) {
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, []);
+  const dialog = useDialog<HTMLDivElement>(onClose);
   const url = `${location.origin}/remote/${code}#${hostKey}`;
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
-      <div class="modal remote-modal" role="dialog" aria-modal="true" aria-label={t("Phone remote")}>
+      <div ref={dialog} tabIndex={-1} class="modal remote-modal" role="dialog" aria-modal="true" aria-label={t("Phone remote")}>
         <div class="spread">
           <h2>{t("Control from your phone")}</h2>
           <button class="btn sm quiet" onClick={onClose} aria-label={t("Close")}>
@@ -544,11 +611,7 @@ function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
   const [text, setText] = useState(() => store.get(`rs.paste.${code}`, ""));
   const [aiResult, setAiResult] = useState<PasteResult | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, []);
+  const dialog = useDialog<HTMLDivElement>(onClose);
   useEffect(() => store.set(`rs.paste.${code}`, text), [text]);
   const parsed = useMemo(() => parsePolls(text), [text]);
   const result = aiResult ?? parsed;
@@ -571,7 +634,7 @@ function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
-      <div class="modal" role="dialog" aria-modal="true" aria-label={t("Add polls")}>
+      <div ref={dialog} tabIndex={-1} class="modal" role="dialog" aria-modal="true" aria-label={t("Add polls")}>
         <div class="spread">
           <h2>{t("Add polls")}</h2>
           <button class="btn sm quiet" onClick={onClose} aria-label={t("Close")}>
@@ -709,30 +772,77 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
   const [words, setWords] = useState(settings.blockedWords.join(", "));
   const [uploading, setUploading] = useState(false);
   const logoRef = useRef<HTMLInputElement>(null);
-  const set = (patch: Partial<Settings>) => send({ type: "setSettings", settings: patch });
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, []);
+  // Every change saves right away; a small "Saved" sign confirms it.
+  const [saved, setSaved] = useState(0);
+  const sendS: Send = (m) => {
+    const ok = send(m);
+    if (ok) setSaved(Date.now());
+    return ok;
+  };
+  const set = (patch: Partial<Settings>) => sendS({ type: "setSettings", settings: patch });
+  const dialog = useDialog<HTMLDivElement>(onClose);
   const Toggle = (p: { k: ToggleKey; label: string; hint?: string }) => <SettingToggle {...p} settings={settings} set={set} />;
   const modUrl = `${location.origin}/mod/${code}#${meta.modKey ?? ""}`;
   const overlayUrl = `${location.origin}/present/${code}?overlay=1#${hostKey}`;
   const embedCode = `<div data-rslide="${code}"></div>\n<script src="${location.origin}/embed.js" async></script>`;
+  const jump = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   const deleteIn = (days: number | null) => set({ deleteAt: days ? Date.now() + days * 86_400_000 : null });
 
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
-      <div class="drawer" role="dialog" aria-modal="true" aria-label={t("Event settings")}>
-        <div class="spread">
-          <h2>{t("Settings")}</h2>
-          <button class="btn sm quiet" onClick={onClose} aria-label={t("Close settings")}>
-            <Icon.x />
-          </button>
+      <div ref={dialog} tabIndex={-1} class="drawer" role="dialog" aria-modal="true" aria-label={t("Event settings")}>
+        <div class="drawer-head">
+          <div class="spread">
+            <h2>{t("Settings")}</h2>
+            {saved > 0 && (
+              <span class="saved-pill" key={saved} role="status">
+                ✓ {t("Saved")}
+              </span>
+            )}
+            <span class="grow" />
+            <button class="btn sm quiet" onClick={onClose} aria-label={t("Close settings")}>
+              <Icon.x />
+            </button>
+          </div>
+          <nav class="drawer-nav" aria-label={t("Settings sections")}>
+            <button type="button" onClick={() => jump("s-questions")}>
+              {t("Questions")}
+            </button>
+            <button type="button" onClick={() => jump("s-word-filter")}>
+              {t("Word filter")}
+            </button>
+            <button type="button" onClick={() => jump("s-labels")}>
+              {t("Labels")}
+            </button>
+            <button type="button" onClick={() => jump("s-rooms")}>
+              {t("Rooms")}
+            </button>
+            <button type="button" onClick={() => jump("s-quiz-teams")}>
+              {t("Quiz teams")}
+            </button>
+            <button type="button" onClick={() => jump("s-audience")}>
+              {t("Audience")}
+            </button>
+            <button type="button" onClick={() => jump("s-moderators")}>
+              {t("Moderators")}
+            </button>
+            <button type="button" onClick={() => jump("s-stream-and-embed")}>
+              {t("Stream and embed")}
+            </button>
+            <button type="button" onClick={() => jump("s-api-and-webhooks")}>
+              {t("API and webhooks")}
+            </button>
+            <button type="button" onClick={() => jump("s-look")}>
+              {t("Look")}
+            </button>
+            <button type="button" onClick={() => jump("s-privacy")}>
+              {t("Privacy")}
+            </button>
+          </nav>
         </div>
 
-        <h3>{t("Questions")}</h3>
+        <h3 id="s-questions">{t("Questions")}</h3>
         {Toggle({ k: "qaOpen", label: t("Taking questions") })}
         {Toggle({ k: "moderation", label: t("Review questions first"), hint: t("New questions stay hidden until you approve them.") })}
         {Toggle({ k: "allowAnonymous", label: t("Allow anonymous questions") })}
@@ -745,7 +855,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
         {meta.ai ? (
           Toggle({ k: "aiAssist", label: t("AI help for repeats"), hint: t("Also catches repeats worded differently, or in another language. Uses Workers AI on your Cloudflare account.") })
         ) : (
-          <p class="muted tiny">{t("AI help is not set up on this server. See the README to turn it on.")}</p>
+          <p class="muted tiny">{t("AI help isn't turned on for this server.")}</p>
         )}
 
         <p class="label">{t("Open and close questions automatically")}</p>
@@ -771,7 +881,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           {t("Leave empty to open and close by hand.")}
         </p>
 
-        <h3>{t("Word filter")}</h3>
+        <h3 id="s-word-filter">{t("Word filter")}</h3>
         <div class="seg" role="group" aria-label={t("Word filter")}>
           {(
             [
@@ -806,19 +916,19 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           </form>
         )}
 
-        <h3>{t("Labels")}</h3>
+        <h3 id="s-labels">{t("Labels")}</h3>
         <p class="muted tiny">{t("Tag questions to sort them, e.g. by topic. Everyone sees the labels.")}</p>
-        <LabelsEditor labels={meta.labels} onSave={(labels) => send({ type: "setLabels", labels })} />
+        <LabelsEditor labels={meta.labels} onSave={(labels) => sendS({ type: "setLabels", labels })} />
 
-        <h3>{t("Rooms")}</h3>
+        <h3 id="s-rooms">{t("Rooms")}</h3>
         <p class="muted tiny">{t("Split Q&A into separate rooms, e.g. one per session or track. Attendees pick a room.")}</p>
-        <RoomsEditor rooms={meta.rooms} code={code} hostKey={hostKey} onSave={(rooms) => send({ type: "setRooms", rooms })} />
+        <RoomsEditor rooms={meta.rooms} code={code} hostKey={hostKey} onSave={(rooms) => sendS({ type: "setRooms", rooms })} />
 
-        <h3>{t("Quiz teams")}</h3>
+        <h3 id="s-quiz-teams">{t("Quiz teams")}</h3>
         <p class="muted tiny">{t("Add two or more teams to play quizzes in teams. People pick a team (or let the app pick) before they answer. Teams are ranked by average points, so team size doesn't matter.")}</p>
-        <LabelsEditor teams labels={meta.teams} onSave={(teams) => send({ type: "setTeams", teams })} />
+        <LabelsEditor teams labels={meta.teams} onSave={(teams) => sendS({ type: "setTeams", teams })} />
 
-        <h3>{t("Audience")}</h3>
+        <h3 id="s-audience">{t("Audience")}</h3>
         {Toggle({ k: "reactions", label: t("Emoji reactions"), hint: t("People can send 👏 ❤️ 🔥 to the big screen.") })}
         <p class="label">{t("Ask people for")}</p>
         <div class="seg" role="group" aria-label={t("What attendees must enter")}>
@@ -839,7 +949,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           style={{ marginTop: 16 }}
           onSubmit={(e) => {
             e.preventDefault();
-            send({ type: "setPasscode", passcode: pass });
+            sendS({ type: "setPasscode", passcode: pass });
             toast(pass.trim() ? t("Passcode set") : t("Passcode removed"));
           }}
         >
@@ -853,7 +963,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           <p class="muted tiny">{t("People who join with the code must also type this. Leave empty for no passcode.")}</p>
         </form>
 
-        <h3>{t("Moderators")}</h3>
+        <h3 id="s-moderators">{t("Moderators")}</h3>
         <p class="muted tiny">{t("Moderators can review, label, reply to and highlight questions. They can't change polls or settings.")}</p>
         <div class="mod-link" style={{ marginTop: 8 }}>
           <input class="input" readOnly value={modUrl} aria-label={t("Moderator link")} onFocus={(e) => e.currentTarget.select()} />
@@ -861,11 +971,11 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
             {t("Copy")}
           </button>
         </div>
-        <button class="btn sm ghost" style={{ marginTop: 8 }} onClick={() => confirm(t("Make a new moderator link? The old link stops working and anyone using it is signed out.")) && send({ type: "newModKey" })}>
+        <button class="btn sm quiet danger" style={{ marginTop: 8 }} onClick={() => confirm(t("Make a new moderator link? The old link stops working and anyone using it is signed out.")) && sendS({ type: "newModKey" })}>
           {t("Make a new link")}
         </button>
 
-        <h3>{t("Stream and embed")}</h3>
+        <h3 id="s-stream-and-embed">{t("Stream and embed")}</h3>
         <p class="label" style={{ marginTop: 0 }}>{t("Stream overlay")}</p>
         <p class="muted tiny">{t("Add as a browser source in OBS, vMix or StreamYard (1920×1080). It has a see-through background and shows the live poll or the question on screen.")}</p>
         <div class="mod-link" style={{ marginTop: 8 }}>
@@ -881,10 +991,10 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           {t("Copy embed code")}
         </button>
 
-        <h3>{t("API and webhooks")}</h3>
-        <ApiSettings code={code} api={meta.api ?? { key: null, webhook: null }} send={send} />
+        <h3 id="s-api-and-webhooks">{t("API and webhooks")}</h3>
+        <ApiSettings code={code} api={meta.api ?? { key: null, webhook: null }} send={sendS} />
 
-        <h3>{t("Look")}</h3>
+        <h3 id="s-look">{t("Look")}</h3>
         <div class="logo-pick">
           {settings.logo ? <img src={mediaUrl(code, settings.logo)} alt={t("Event logo")} /> : <span class="muted small">{t("No logo")}</span>}
           <input
@@ -944,7 +1054,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
               ["code", t("Join code")],
             ] as const
           ).map(([m, l]) => (
-            <button key={m} aria-pressed={meta.presentMode === m} onClick={() => send({ type: "setPresentMode", mode: m })}>
+            <button key={m} aria-pressed={meta.presentMode === m} onClick={() => sendS({ type: "setPresentMode", mode: m })}>
               {l}
             </button>
           ))}
@@ -953,7 +1063,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
           {t("Auto shows the live poll when one is running, and questions the rest of the time.")}
         </p>
 
-        <h3>{t("Privacy")}</h3>
+        <h3 id="s-privacy">{t("Privacy")}</h3>
         <p class="label" style={{ marginTop: 6 }}>
           {t("Delete this event automatically")}
         </p>
@@ -967,7 +1077,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
             deleteIn(v === "never" ? null : Number(v));
           }}
         >
-          <option value="">{settings.deleteAt ? t("On {date}", { date: new Date(settings.deleteAt).toLocaleString() }) : t("Never")}</option>
+          <option value="">{settings.deleteAt ? t("On {date}", { date: new Date(settings.deleteAt).toLocaleString(lang, { dateStyle: "medium", timeStyle: "short" }) }) : t("Never")}</option>
           <option value="never">{t("Never")}</option>
           <option value="1">{t("1 day from now")}</option>
           <option value="7">{t("{n} days from now", { n: 7 })}</option>
@@ -977,6 +1087,18 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
         <p class="muted tiny" style={{ marginTop: 6 }}>
           {t("Everything is deleted: questions, answers, names and images. Download your results first.")}
         </p>
+        <button
+          class="btn sm danger"
+          style={{ marginTop: 14 }}
+          onClick={() => {
+            const typed = prompt(t("This deletes the event for everyone, right now, and can't be undone. Type the code {code} to confirm.", { code }));
+            if (typed === null) return;
+            if (typed.trim().toUpperCase() !== code) return toast(t("The code didn't match, so nothing was deleted."));
+            sendS({ type: "deleteEvent", confirm: typed });
+          }}
+        >
+          {t("Delete this event now…")}
+        </button>
       </div>
     </>
   );
@@ -1187,6 +1309,24 @@ function RoomsEditor({ rooms, code, hostKey, onSave }: { rooms: Room[]; code: st
 
 // ---------- questions ----------
 
+/** "More" menu for less-used actions, so cards stay calm. Closes after a choice. */
+function More({ children }: { children: ComponentChildren }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const out = (e: MouseEvent) => ref.current?.open && !ref.current.contains(e.target as Node) && (ref.current.open = false);
+    document.addEventListener("click", out);
+    return () => document.removeEventListener("click", out);
+  }, []);
+  return (
+    <details class="more" ref={ref} onClick={(e) => (e.target as HTMLElement).closest(".more-list button") && ref.current && (ref.current.open = false)}>
+      <summary class="btn sm ghost">{t("More")}</summary>
+      <div class="more-list" role="group" aria-label={t("More actions")}>
+        {children}
+      </div>
+    </details>
+  );
+}
+
 function HostQuestion({ q, act, send, labels, rooms, original }: {
   q: Question;
   act: (type: ModAction, id: string) => void;
@@ -1258,7 +1398,7 @@ function HostQuestion({ q, act, send, labels, rooms, original }: {
               {t("Approve")}
             </button>
           )}
-          {q.status !== "archived" && (
+          {(q.status === "live" || q.status === "answered") && (
             <button class={`btn sm ${q.highlighted ? "on" : "ghost"}`} onClick={() => act("highlight", q.id)}>
               {q.highlighted ? t("Remove from screen") : t("Show on screen")}
             </button>
@@ -1273,33 +1413,39 @@ function HostQuestion({ q, act, send, labels, rooms, original }: {
               {t("Reply")}
             </button>
           )}
-          {labels.length > 0 && (
-            <button class={`btn sm ${tagging ? "on" : "ghost"}`} onClick={() => setTagging(!tagging)}>
-              {tagging ? t("Done") : t("Label")}
+          {tagging && (
+            <button class="btn sm on" onClick={() => setTagging(false)}>
+              {t("Done")}
             </button>
           )}
-          <button class="btn sm ghost" onClick={() => act("archive", q.id)}>
-            {q.status === "archived" ? t("Restore") : t("Archive")}
-          </button>
-          {rooms.length > 1 && (
-            <select class="input btn sm ghost" aria-label={t("Move to room")} value={q.room} onChange={(e) => send({ type: "moveQuestion", id: q.id, room: e.currentTarget.value })} style={{ width: "auto" }}>
-              {rooms.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          )}
-          <button class="btn sm danger" onClick={() => act("deleteQuestion", q.id)}>
-            {t("Delete")}
-          </button>
+          <More>
+            {labels.length > 0 && !tagging && <button onClick={() => setTagging(true)}>{t("Label")}</button>}
+            {rooms.length > 1 && (
+              <label class="more-select">
+                {t("Move to room")}
+                <select class="input" value={q.room} onChange={(e) => send({ type: "moveQuestion", id: q.id, room: e.currentTarget.value })}>
+                  {rooms.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button onClick={() => act("archive", q.id)}>{q.status === "archived" ? t("Restore") : t("Archive")}</button>
+            <button class="danger" onClick={() => act("deleteQuestion", q.id)}>
+              {t("Delete")}
+            </button>
+          </More>
         </div>
       </div>
     </article>
   );
 }
 
-function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEdit }: {
+function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEdit, liveTitle }: {
+  /** Title of the poll that's live now, if it isn't this one. */
+  liveTitle?: string;
   code: string;
   poll: Poll;
   results: ReturnType<typeof resultsOf>;
@@ -1312,7 +1458,7 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
   const confirmThen = (msg: string, m: ClientMsg) => confirm(msg) && send(m);
   const statusText = p.status === "active" ? t("Live now") : p.status === "closed" ? t("Closed") : t("Not started");
   return (
-    <div class={`poll-item ${p.status === "active" ? "active" : ""}`}>
+    <div id={`poll-${p.id}`} class={`poll-item ${p.status === "active" ? "active" : ""}`}>
       <div class="spread">
         <span class="row" style={{ gap: 8 }}>
           <span class={`status ${p.status}`}>{statusText}</span>
@@ -1344,14 +1490,23 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
             {t("Close poll")}
           </button>
         ) : (
-          <button class="btn sm accent" onClick={() => send({ type: "activatePoll", pollId: p.id })}>
+          <button
+            class="btn sm accent"
+            title={liveTitle ? t("This closes “{title}”", { title: liveTitle }) : undefined}
+            onClick={() => {
+              send({ type: "activatePoll", pollId: p.id });
+              toast(liveTitle ? t("Launched. “{title}” was closed.", { title: liveTitle }) : t("Launched. It's live for everyone."));
+            }}
+          >
             {p.status === "closed" ? t("Reopen") : t("Launch")}
           </button>
         )}
         {p.type === "quiz" ? (
+          p.status !== "draft" && (
           <button class={`btn sm ${p.revealed ? "on" : "ghost"}`} onClick={() => send({ type: "revealAnswer", pollId: p.id })}>
             {p.revealed ? t("Hide answer") : t("Reveal answer")}
           </button>
+          )
         ) : (
           <button class="btn sm ghost" onClick={() => send({ type: "toggleResults", pollId: p.id })}>
             {p.showResults ? t("Hide results from audience") : t("Show results to audience")}
@@ -1360,17 +1515,13 @@ function HostPoll({ code, poll: p, results, first, last, clockOffset, send, onEd
         <button class="btn sm ghost" onClick={onEdit}>
           {t("Edit")}
         </button>
-        <button class="btn sm ghost" onClick={() => send({ type: "duplicatePoll", pollId: p.id })}>
-          {t("Duplicate")}
-        </button>
-        {results.total > 0 && (
-          <button class="btn sm ghost" onClick={() => confirmThen(t("Clear every answer to this poll?"), { type: "resetPoll", pollId: p.id })}>
-            {t("Clear answers")}
+        <More>
+          <button onClick={() => send({ type: "duplicatePoll", pollId: p.id })}>{t("Duplicate")}</button>
+          {results.total > 0 && <button onClick={() => confirmThen(t("Clear every answer to this poll?"), { type: "resetPoll", pollId: p.id })}>{t("Clear answers")}</button>}
+          <button class="danger" onClick={() => confirmThen(t("Delete this poll and its answers?"), { type: "deletePoll", pollId: p.id })}>
+            {t("Delete")}
           </button>
-        )}
-        <button class="btn sm danger" onClick={() => confirmThen(t("Delete this poll and its answers?"), { type: "deletePoll", pollId: p.id })}>
-          {t("Delete")}
-        </button>
+        </More>
       </div>
     </div>
   );

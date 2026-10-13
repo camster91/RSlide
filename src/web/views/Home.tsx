@@ -32,6 +32,9 @@ export function Home() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       rememberHosted({ code: d.code, key: d.hostKey, title: d.title, ts: Date.now() });
+      try {
+        sessionStorage.setItem("rs.new", d.code);
+      } catch {}
       navigate(`/host/${d.code}#${d.hostKey}`);
     } catch (err) {
       toast((err as Error).message || t("Could not create the event. Try again."));

@@ -52,13 +52,13 @@ const q1 = host.snap.polls[0];
 host.send({ type: "activatePoll", pollId: q1.id });
 await e.until(() => e.snap.meta.activePollId === q1.id);
 e.send({ type: "respond", pollId: q1.id, value: [1] });
-ok(await e.until(() => e.errors.includes("Pick a team first")), "people without a team must pick one before a quiz");
+ok(await e.until(() => e.state.me!.team !== null), "answering a quiz without a team joins the smallest team");
 // Owls: a right, c?  Foxes: b right, d wrong.
 for (const p of [a, b, c, d]) {
   const right = p !== d;
   p.send({ type: "respond", pollId: q1.id, value: [right ? 1 : 0] });
 }
-ok(await host.until(() => host.snap.results[q1.id]?.total === 4), "team players answer");
+ok(await host.until(() => host.snap.results[q1.id]?.total === 5), "team players answer");
 a.send({ type: "joinTeam", team: foxes.id });
 ok(await a.until(() => a.errors.includes("You've already played for your team")), "team is locked after playing");
 
@@ -68,7 +68,7 @@ const board = host.snap.leaderboard.teams!;
 const owlTeam = board.find((x) => x.id === owls.id)!;
 const foxTeam = board.find((x) => x.id === foxes.id)!;
 const team = (p: Client) => p.state.me!.team;
-const expected = (id: string) => [a, b, c, d].filter((p) => team(p) === id && p !== d).length * 1000;
+const expected = (id: string) => [a, b, c, d, e].filter((p) => team(p) === id && p !== d).length * 1000;
 ok(owlTeam.points === expected(owls.id) && foxTeam.points === expected(foxes.id), `team totals add up (${owlTeam.points} / ${foxTeam.points})`);
 ok(board[0].avg >= board[1].avg, "teams are ranked by average");
 ok(host.snap.leaderboard.top.every((x) => x.team === owls.id || x.team === foxes.id), "players on the board show their team");

@@ -874,20 +874,27 @@ export class EventRoom extends DurableObject<Env> {
     else await this.ctx.storage.deleteAlarm();
   }
 
+  /** Deletes everything: answers, questions, images. Everyone connected is told the event is gone. */
+  private async destroy() {
+    const ev = this.ev;
+    if (!ev) return;
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(CLOSE.NOT_FOUND, "Event deleted");
+      } catch {}
+    }
+    await this.deleteMedia(ev.code);
+    this.ev = null;
+    await this.ctx.storage.deleteAll();
+  }
+
   async alarm() {
     const ev = this.ev;
     if (!ev) return;
     const now = Date.now();
     const s = ev.settings;
     if ((ev.expiresAt && now >= ev.expiresAt) || (s.deleteAt && now >= s.deleteAt)) {
-      for (const ws of this.ctx.getWebSockets()) {
-        try {
-          ws.close(CLOSE.NOT_FOUND, "Event deleted");
-        } catch {}
-      }
-      await this.deleteMedia(ev.code);
-      this.ev = null;
-      await this.ctx.storage.deleteAll();
+      await this.destroy();
       return;
     }
     let changed = false;
@@ -1017,6 +1024,14 @@ export class EventRoom extends DurableObject<Env> {
 
   private teamOf(pid: string): string | undefined {
     return this.sql.exec<{ team: string | null }>("SELECT team FROM participants WHERE pid = ?", pid).toArray()[0]?.team ?? undefined;
+  }
+
+  private autoTeam(pid: string) {
+    const counts = this.teamCounts();
+    const team = [...this.ev!.teams].sort((a, b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0))[0];
+    this.sql.exec("INSERT INTO participants (pid, name, email, joined_at, team) VALUES (?,'','',?,?) ON CONFLICT(pid) DO UPDATE SET team = excluded.team", pid, Date.now(), team.id);
+    this.invalidateLb();
+    this.touchMe(pid);
   }
 
   private teamCounts(): Map<string, number> {
@@ -1205,7 +1220,8 @@ export class EventRoom extends DurableObject<Env> {
           if (p.revealed) throw new UserError("Answers are closed — the answer has been revealed");
           if (p.timeLimit && p.startedAt && now > p.startedAt + p.timeLimit * 1000 + QUIZ_GRACE_MS) throw new UserError("Time's up!");
           if (this.sql.exec("SELECT 1 FROM responses WHERE poll_id = ? AND pid = ?", p.id, pid).toArray().length) throw new UserError("You've already answered this one");
-          if (ev.teams.length && !isStaff(role) && !this.teamOf(pid)) throw new UserError("Pick a team first");
+          // No team yet: join the smallest one, so nobody loses quiz time picking.
+          if (ev.teams.length && !isStaff(role) && !this.teamOf(pid)) this.autoTeam(pid);
           elapsed = p.startedAt ? Math.max(0, now - p.startedAt) : 0;
         }
         const value = this.filterAnswer(p, validateResponse(p, msg.value), role);
@@ -1451,6 +1467,10 @@ export class EventRoom extends DurableObject<Env> {
   private handleHost(msg: ClientMsg) {
     const ev = this.ev!;
     switch (msg.type) {
+      case "deleteEvent":
+        if (String(msg.confirm ?? "").trim().toUpperCase() !== ev.code) throw new UserError("Type the event code to confirm");
+        void this.destroy();
+        return;
       case "setApiKey":
         ev.api.key = msg.on ? newApiKey() : null;
         return this.saveEvent();

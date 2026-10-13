@@ -42,11 +42,11 @@ export function SignIn() {
     return (
       <>
         <TopBar />
-        <div class="gate">
+        <main class="gate">
           <div class="panel stack">
             <h1>{t("Signing you in…")}</h1>
           </div>
-        </div>
+        </main>
       </>
     );
 
@@ -68,7 +68,7 @@ export function SignIn() {
   return (
     <>
       <TopBar />
-      <div class="gate">
+      <main class="gate">
         <div class="panel stack">
           {sent ? (
             <>
@@ -102,7 +102,7 @@ export function SignIn() {
             </form>
           )}
         </div>
-      </div>
+      </main>
     </>
   );
 }
@@ -171,7 +171,7 @@ export function MyEvents() {
                     {t("Analytics")}
                   </a>
                   <button class="btn sm quiet" onClick={() => remove(e.code, e.title)} aria-label={t("Remove {title} from your list", { title: e.title })}>
-                    {t("Remove")}
+                    {t("Remove from list")}
                   </button>
                 </div>
               </li>

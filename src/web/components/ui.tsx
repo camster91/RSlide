@@ -62,6 +62,46 @@ export const Icon = {
   check: () => svg(<path d="m5 12 5 5L20 7" />),
 };
 
+// ---------- dialogs ----------
+
+const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * For drawers and pop-up windows: moves keyboard focus inside, keeps Tab inside,
+ * closes on Escape, and puts focus back where it was when closed.
+ */
+export function useDialog<T extends HTMLElement>(onClose: () => void) {
+  const ref = useRef<T>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    const el = ref.current;
+    const first = el?.querySelector<HTMLElement>("[autofocus]") ?? el?.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? el)?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close.current();
+        return;
+      }
+      if (e.key !== "Tab" || !el) return;
+      const items = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((x) => x.offsetParent !== null);
+      if (!items.length) return;
+      const [a, z] = [items[0], items[items.length - 1]];
+      if (e.shiftKey && document.activeElement === a) (e.preventDefault(), z.focus());
+      else if (!e.shiftKey && document.activeElement === z) (e.preventDefault(), a.focus());
+      else if (!el.contains(document.activeElement)) (e.preventDefault(), a.focus());
+    };
+    document.addEventListener("keydown", key, true);
+    return () => {
+      document.removeEventListener("keydown", key, true);
+      before?.focus?.();
+    };
+  }, []);
+  return ref;
+}
+
 // ---------- chrome ----------
 
 /** The app's brand, or the event's own logo when the host uploaded one. */
@@ -86,13 +126,15 @@ export function Brand({ logo, code }: { logo?: string | null; code?: string }) {
   );
 }
 
-export function TopBar({ title, children, logo, code }: { title?: string; children?: ComponentChildren; logo?: string | null; code?: string }) {
+export function TopBar({ title, children, logo, code, host = false }: { title?: string; children?: ComponentChildren; logo?: string | null; code?: string; host?: boolean }) {
   return (
-    <header class="bar">
+    <header class={`bar ${host ? "host" : ""}`}>
       <Brand logo={logo} code={code} />
-      <div class="title">{title}</div>
-      {children}
-      <LangPicker />
+      {title ? <h1 class="title">{title}</h1> : <div class="title" />}
+      <div class="bar-actions">
+        {children}
+        <LangPicker />
+      </div>
     </header>
   );
 }
@@ -113,10 +155,20 @@ export function LangPicker({ label = false }: { label?: boolean }) {
   );
 }
 
+/** A clear banner while the connection is down (the dot alone was too easy to miss). */
+export function OfflineBanner({ status }: { status: ConnStatus }) {
+  if (status !== "offline") return null;
+  return (
+    <div class="offline-banner" role="status">
+      <span class="spinner" aria-hidden="true" /> {t("You're offline. Reconnecting… What you do now is sent when you're back.")}
+    </div>
+  );
+}
+
 export function ConnDot({ status }: { status: ConnStatus }) {
   const on = status === "online";
   return (
-    <span class="chip" title={on ? t("Connected") : t("Reconnecting…")} aria-label={on ? t("Connected") : t("Reconnecting")}>
+    <span class="conn" role="img" title={on ? t("Connected") : t("Reconnecting…")} aria-label={on ? t("Connected") : t("Reconnecting")}>
       <span class={`dot ${on ? "" : "off"}`} />
     </span>
   );
@@ -135,7 +187,7 @@ export function Message({ title, children }: { title: string; children?: Compone
   return (
     <>
       <TopBar />
-      <div class="gate">
+      <main class="gate">
         <div class="panel stack">
           <h1>{title}</h1>
           {children}
@@ -143,7 +195,7 @@ export function Message({ title, children }: { title: string; children?: Compone
             {t("Back to start")}
           </a>
         </div>
-      </div>
+      </main>
     </>
   );
 }
@@ -207,13 +259,14 @@ export function Countdown({ poll, clockOffset, big = false }: { poll: Poll; cloc
 
 const CLOUD_COLORS = ["var(--brand)", "var(--text)", "color-mix(in srgb, var(--brand) 60%, var(--accent))", "var(--muted)"];
 
-function Bar({ label, value, pct, img, lead, correct }: { label: ComponentChildren; value: string; pct: number; img?: string | null; lead?: boolean; correct?: boolean }) {
+function Bar({ label, value, pct, img, lead, correct, mine }: { label: ComponentChildren; value: string; pct: number; img?: string | null; lead?: boolean; correct?: boolean; mine?: boolean }) {
   return (
-    <div class={`res ${lead ? "lead" : ""} ${correct ? "correct" : ""}`}>
+    <div class={`res ${lead ? "lead" : ""} ${correct ? "correct" : ""} ${mine ? "mine" : ""}`}>
       <div class="lbl">
         <span>
           {img && <img class="thumb" src={img} alt="" />}
           {label}
+          {mine && <span class="your-answer">{t("Your answer")}</span>}
         </span>
         <b>{value}</b>
       </div>
@@ -224,7 +277,7 @@ function Bar({ label, value, pct, img, lead, correct }: { label: ComponentChildr
   );
 }
 
-function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsData; code: string; big: boolean; correct?: number[] }) {
+export function ItemResults({ item, r, code, big, correct, mine }: { item: Item; r: ResultsData; code: string; big: boolean; correct?: number[]; mine?: number[] }) {
   const img = (i: number) => (item.images?.[i] ? mediaUrl(code, item.images[i]!) : null);
   if (item.type === "points" && r.scores) {
     const order = item.options.map((o, i) => ({ o, i, s: r.scores![i] })).sort((a, b) => b.s - a.s);
@@ -248,7 +301,7 @@ function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsDa
       <>
         {item.options.map((o, i) => {
           const pct = Math.round((r.counts![i] / denom) * 100);
-          return <Bar key={i} label={o} value={`${pct}%`} pct={pct} img={img(i)} lead={!correct && max > 0 && r.counts![i] === max} correct={correct?.includes(i)} />;
+          return <Bar key={i} label={o} value={`${pct}%`} pct={pct} img={img(i)} lead={!correct && max > 0 && r.counts![i] === max} correct={correct?.includes(i)} mine={mine?.includes(i)} />;
         })}
       </>
     );
@@ -302,12 +355,13 @@ function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsDa
   if (item.type === "wordcloud" && r.words) {
     if (!r.words.length) return <Empty>{t("Words will appear here as people send them.")}</Empty>;
     const max = Math.max(1, ...r.words.map((w) => w[1]));
-    const base = big ? 22 : 15;
-    const span = big ? 78 : 34;
+    // On the big screen, sizes follow the screen so the cloud always fits.
+    const words = big ? r.words.slice(0, 40) : r.words;
+    const size = (c: number) => (big ? `${(2.4 + Math.sqrt(c / max) * 6.4).toFixed(2)}vmin` : 15 + Math.sqrt(c / max) * 34);
     return (
       <div class="cloud">
-        {r.words.map(([w, c], i) => (
-          <span key={w} title={plural(c, "vote")} style={{ fontSize: base + Math.sqrt(c / max) * span, color: CLOUD_COLORS[i % CLOUD_COLORS.length] }}>
+        {words.map(([w, c], i) => (
+          <span key={w} title={plural(c, "vote")} style={{ fontSize: size(c), color: CLOUD_COLORS[i % CLOUD_COLORS.length] }}>
             {w}
           </span>
         ))}
@@ -327,7 +381,7 @@ function ItemResults({ item, r, code, big, correct }: { item: Item; r: ResultsDa
   return null;
 }
 
-export function ResultsView({ poll, results, code, big = false }: { poll: Poll; results: ResultsData; code: string; big?: boolean }) {
+export function ResultsView({ poll, results, code, big = false, mine }: { poll: Poll; results: ResultsData; code: string; big?: boolean; mine?: number[] }) {
   if (results.hidden)
     return (
       <p class="muted">
@@ -354,8 +408,8 @@ export function ResultsView({ poll, results, code, big = false }: { poll: Poll; 
     );
   return (
     <>
-      <ItemResults item={poll as unknown as Item} r={results} code={code} big={big} correct={poll.type === "quiz" ? poll.correct : undefined} />
-      {poll.type !== "grid" && poll.type !== "pin" && (
+      <ItemResults item={poll as unknown as Item} r={results} code={code} big={big} correct={poll.type === "quiz" ? poll.correct : undefined} mine={mine} />
+      {!big && poll.type !== "grid" && poll.type !== "pin" && (
         <p class="muted small" style={{ marginTop: 12 }}>
           {plural(results.total, "response")}
         </p>
@@ -391,7 +445,14 @@ export function VoteCount({ q }: { q: Question }) {
 
 // ---------- leaderboard ----------
 
+/** Rank with ties shared: 1, 1, 3 (players on equal points share a place). */
+export const rankOf = (top: Leaderboard["top"], i: number) => 1 + top.filter((x) => x.points > top[i].points).length;
+
+export const podiumVisible = (board: Leaderboard) => board.top.length >= 2 && board.top[0].points > 0;
+
 export function Podium({ board }: { board: Leaderboard }) {
+  // A podium with one player, or nobody on points yet, looks broken. Leave it out.
+  if (!podiumVisible(board)) return null;
   const [a, b, c] = board.top;
   const step = (e: Leaderboard["top"][number] | undefined, place: 1 | 2 | 3) => (
     <div class={`step p${place}`}>
@@ -403,8 +464,8 @@ export function Podium({ board }: { board: Leaderboard }) {
       ) : (
         <div class="pts">—</div>
       )}
-      <div class="block" aria-label={t("Place {n}", { n: place })}>
-        {place}
+      <div class="block" aria-label={t("Place {n}", { n: e ? rankOf(board.top, place - 1) : place })}>
+        {e ? rankOf(board.top, place - 1) : place}
       </div>
     </div>
   );
@@ -417,14 +478,16 @@ export function Podium({ board }: { board: Leaderboard }) {
   );
 }
 
-export function Board({ board, from = 0, limit = 10, teams }: { board: Leaderboard; from?: number; limit?: number; teams?: Label[] }) {
+export function Board({ board, from = 0, limit = 10, teams, afterPodium = false }: { board: Leaderboard; from?: number; limit?: number; teams?: Label[]; afterPodium?: boolean }) {
+  // After a podium, the list starts at 4th place, unless the podium was left out.
+  if (afterPodium) from = podiumVisible(board) ? 3 : 0;
   const rows = board.top.slice(from, limit);
   if (!rows.length) return null;
   return (
     <ol class="board" start={from + 1}>
       {rows.map((e, i) => (
         <li key={i}>
-          <span class="rank">{from + i + 1}</span>
+          <span class="rank">{rankOf(board.top, from + i)}</span>
           <span class="grow">
             {e.name}
             {teams && e.team && <TeamDot team={teams.find((x) => x.id === e.team)} />}
@@ -507,6 +570,12 @@ export function Confetti({ fire }: { fire: unknown }) {
   const [pieces, setPieces] = useState<{ id: number; left: number; color: string; dur: number; delay: number; drift: number; spin: number }[]>([]);
   useEffect(() => {
     if (!fire) return;
+    // Once per moment: not again when the page reloads or reconnects.
+    const seen = `rs.confetti.${location.pathname}.${String(fire)}`;
+    try {
+      if (sessionStorage.getItem(seen)) return;
+      sessionStorage.setItem(seen, "1");
+    } catch {}
     const p = Array.from({ length: 90 }, (_, i) => ({
       id: i,
       left: Math.random() * 100,
@@ -543,8 +612,8 @@ export function GridChart({ item, pairs, total, big }: { item: Item; pairs: [num
   const [hover, setHover] = useState<number | null>(null);
   if (!total) return <Empty>{t("Dots appear here as people answer.")}</Empty>;
   return (
-    <figure class={`grid-chart ${big ? "big" : ""}`} aria-label={t("{x} versus {y}", { x: ax, y: ay })}>
-      <svg viewBox={`0 0 ${W} ${W}`} role="img">
+    <figure class={`grid-chart ${big ? "big" : ""}`}>
+      <svg viewBox={`0 0 ${W} ${W}`} role="img" aria-label={t("{x} versus {y}", { x: ax, y: ay })}>
         <rect x={pad} y={pad} width={W - pad * 2} height={W - pad * 2} class="g-frame" />
         <line x1={W / 2} y1={pad} x2={W / 2} y2={W - pad} class="g-mid" />
         <line x1={pad} y1={W / 2} x2={W - pad} y2={W / 2} class="g-mid" />
@@ -558,15 +627,28 @@ export function GridChart({ item, pairs, total, big }: { item: Item; pairs: [num
           const cx = pos(x);
           const cy = W - pos(y);
           const right = cx < W - 120;
+          // Options that land on (almost) the same spot get their labels stacked, not drawn on top of each other.
+          const near = pairs.slice(0, i).filter(([x2, y2]) => Math.abs(pos(x2) - cx) < 60 && Math.abs(pos(y2) - pos(y)) < 14).length;
+          const ly = cy + 4 + near * 16;
           return (
-            <g key={i} class={`g-pt ${hover === i ? "on" : ""}`} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} tabIndex={0} onFocus={() => setHover(i)} onBlur={() => setHover(null)}>
+            <g
+              key={i}
+              class={`g-pt ${hover === i ? "on" : ""}`}
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(null)}
+              tabIndex={0}
+              onFocus={() => setHover(i)}
+              onBlur={() => setHover(null)}
+              role="img"
+              aria-label={`${item.options[i]}: ${ax} ${x}, ${ay} ${y}`}
+            >
               <circle cx={cx} cy={cy} r={16} class="g-hit" />
               <circle cx={cx} cy={cy} r={7} class="g-dot" />
-              <text x={right ? cx + 12 : cx - 12} y={cy + 4} text-anchor={right ? "start" : "end"} class="g-label">
+              <text x={right ? cx + 12 : cx - 12} y={ly} text-anchor={right ? "start" : "end"} class="g-label">
                 {item.options[i]}
               </text>
               {hover === i && (
-                <text x={right ? cx + 12 : cx - 12} y={cy + 20} text-anchor={right ? "start" : "end"} class="g-val">
+                <text x={right ? cx + 12 : cx - 12} y={ly + 16} text-anchor={right ? "start" : "end"} class="g-val">
                   {ax} {x}, {ay} {y}
                 </text>
               )}
@@ -577,6 +659,25 @@ export function GridChart({ item, pairs, total, big }: { item: Item; pairs: [num
       <figcaption class="muted tiny">
         {t("Average of {answers}, on a {min}–{max} scale.", { answers: plural(total, "answer"), min, max })}
       </figcaption>
+      <table class="sr-only">
+        <caption>{t("{x} versus {y}", { x: ax, y: ay })}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{t("Option")}</th>
+            <th scope="col">{ax}</th>
+            <th scope="col">{ay}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pairs.map(([x, y], i) => (
+            <tr key={i}>
+              <th scope="row">{item.options[i]}</th>
+              <td>{x}</td>
+              <td>{y}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </figure>
   );
 }
@@ -585,7 +686,7 @@ export function GridChart({ item, pairs, total, big }: { item: Item; pairs: [num
 export function PinMap({ src, pins, big, mine }: { src: string; pins: [number, number][]; big: boolean; mine?: [number, number] | null }) {
   return (
     <figure class={`pin-map ${big ? "big" : ""}`}>
-      <div class="pin-wrap">
+      <div class="pin-wrap" role="img" aria-label={t("Picture with {pins}", { pins: plural(pins.length, "pin") })}>
         <img src={src} alt="" />
         {pins.map(([x, y], i) => (
           <i key={i} class="pin-dot" style={{ left: `${x * 100}%`, top: `${y * 100}%` }} />

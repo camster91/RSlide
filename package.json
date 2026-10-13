@@ -1,6 +1,6 @@
 {
   "name": "rslide",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "RSlide — open-source live Q&A and polling (a self-hosted Slido alternative) on Cloudflare Workers",
   "scripts": {
     "dev": "vite dev",

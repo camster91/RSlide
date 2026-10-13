@@ -17,6 +17,8 @@ export function useRoom(code: string, role: Role, opts: Options = {}) {
   const [state, dispatch] = useReducer<RoomState, ServerMsg>(reduce, emptyRoom());
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const wsRef = useRef<WebSocket | null>(null);
+  /** Messages sent while offline. They go out as soon as the connection is back. */
+  const outbox = useRef<string[]>([]);
   const onReactions = useRef(opts.onReactions);
   onReactions.current = opts.onReactions;
   const { key, passcode } = opts;
@@ -37,6 +39,9 @@ export function useRoom(code: string, role: Role, opts: Options = {}) {
         setStatus("online");
         clearInterval(ping);
         ping = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(PING), 25_000);
+        const queued = outbox.current.splice(0);
+        for (const m of queued) ws.send(m);
+        if (queued.length) toast(t("Back online. Sent what you did while offline."));
       };
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data as string) as ServerMsg;
@@ -73,10 +78,16 @@ export function useRoom(code: string, role: Role, opts: Options = {}) {
     };
   }, [code, role, key, passcode]);
 
-  const send = useCallback((msg: ClientMsg) => {
+  /** Sends now (true), or keeps it to send when back online (false). Reactions are dropped when offline. */
+  const send = useCallback((msg: ClientMsg): boolean => {
     const ws = wsRef.current;
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-    else toast(t("Reconnecting… try again in a second"));
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+      return true;
+    }
+    if (msg.type !== "react" && outbox.current.length < 50) outbox.current.push(JSON.stringify(msg));
+    toast(msg.type === "react" ? t("Reconnecting… try again in a second") : t("You're offline. We'll send this when you're back."));
+    return false;
   }, []);
 
   return { state, status, send };

@@ -175,7 +175,7 @@ export function Analytics({ code }: { code: string }) {
   const answered = data.polls.reduce((n, x) => n + x.responses, 0);
 
   return (
-    <div class="report">
+    <main class="report">
       <div class="spread" style={{ marginBottom: 24 }}>
         <Brand />
         <a class="btn ghost sm" href={`/host/${code}#${key}`}>
@@ -262,6 +262,6 @@ export function Analytics({ code }: { code: string }) {
           </div>
         </section>
       )}
-    </div>
+    </main>
   );
 }

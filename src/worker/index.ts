@@ -52,7 +52,7 @@ export default {
         template = templateById(body.template) ?? null;
         if (!template) return json({ error: "Unknown template" }, 400);
       }
-      const title = clean(body.title, LIMITS.title) || (body.from && template?.title ? `${template.title} (copy)`.slice(0, LIMITS.title) : "Untitled session");
+      const title = clean(body.title, LIMITS.title) || (body.from && template?.title ? `${template.title} (copy)`.slice(0, LIMITS.title) : "Untitled event");
       for (let i = 0; i < 5; i++) {
         const code = newCode();
         const room = env.EVENTS.getByName(code);

@@ -1,11 +1,11 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import type { Poll, Snapshot } from "../../shared/protocol";
 import { activePoll, resultsOf, sortQuestions } from "../../shared/store";
 import { useRoom } from "../lib/room";
 import { t, tj } from "../lib/i18n";
 import { CFG, joinUrl, plural, useTheme, useTitle } from "../lib/util";
-import { Board, Brand, ConnProblem, Confetti, Countdown, Icon, Podium, QrCode, TeamBoard, ResultsView, TYPE_LABEL, useFloaters } from "../components/ui";
+import { Board, Brand, ConnProblem, Confetti, Countdown, Icon, ItemResults, Podium, podiumVisible, QrCode, TeamBoard, ResultsView, TYPE_LABEL, useFloaters } from "../components/ui";
 
 export function Present({ code }: { code: string }) {
   const key = decodeURIComponent(location.hash.slice(1));
@@ -32,27 +32,34 @@ export function Present({ code }: { code: string }) {
   const host = location.host;
   if (overlay && s) return <Overlay code={code} s={s} poll={poll} mode={mode} room={room?.id} clockOffset={state.clockOffset} floaters={floaters.layer} />;
 
+  // The join screen fills the whole display: before an event starts, or when nothing is live.
+  if (!s || mode === "code" || (mode === "poll" && !poll)) return <JoinHero code={code} host={host} s={s} floaters={floaters.layer} />;
+
   let stage = null;
-  if (s && mode === "poll") {
-    stage = poll ? (
-      <>
+  if (mode === "poll" && poll) {
+    const results = resultsOf(s, poll.id);
+    const options = poll.type === "survey" ? 0 : poll.options.length;
+    const density = options > 8 ? "xdense" : options > 5 ? "dense" : "";
+    stage = (
+      <div class={`poll-stage ${density} ${poll.title.length > 110 ? "long-title" : ""}`}>
         <div class="stage-label">
           <span class="tag live">{poll.type === "quiz" ? t("Quiz") : t("Live poll")}</span>
           {poll.type !== "quiz" && <span>{TYPE_LABEL[poll.type]}</span>}
+          <span class="grow" />
+          <span class="stage-count num">{t("{responses} so far", { responses: plural(results.total, "response") })}</span>
         </div>
         <div class={poll.type === "quiz" && !poll.revealed ? "split" : undefined}>
           <h1>{poll.title}</h1>
           {poll.type === "quiz" && !poll.revealed && <Countdown poll={poll} clockOffset={state.clockOffset} big />}
         </div>
+        {poll.type === "quiz" && poll.revealed && <QuizHeadline poll={poll} counts={results.counts ?? []} total={results.total} />}
         {poll.type === "quiz" && !poll.revealed ? (
-          <QuizWaiting count={resultsOf(s, poll.id).total} options={poll.options} />
+          <QuizWaiting count={results.total} options={poll.options} />
+        ) : poll.type === "survey" ? (
+          <SurveyStage poll={poll} results={results} code={code} />
         ) : (
-          <ResultsView poll={poll} results={resultsOf(s, poll.id)} code={code} big />
+          <ResultsView poll={poll} results={results} code={code} big />
         )}
-      </>
-    ) : (
-      <div class="feature" style={{ marginTop: "18vh" }}>
-        {t("No poll running right now.")}
       </div>
     );
   } else if (s && mode === "leaderboard") {
@@ -71,10 +78,14 @@ export function Present({ code }: { code: string }) {
               <Board board={s.leaderboard} limit={8} teams={s.meta.teams} />
             </div>
           </div>
+        ) : s.leaderboard.top.length && !podiumVisible(s.leaderboard) ? (
+          <div style={{ maxWidth: "60vw" }}>
+            <Board board={s.leaderboard} limit={8} />
+          </div>
         ) : s.leaderboard.top.length ? (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr)", gap: "4vw", alignItems: "end" }}>
             <Podium board={s.leaderboard} />
-            <Board board={s.leaderboard} from={3} />
+            <Board board={s.leaderboard} afterPodium />
           </div>
         ) : (
           <div class="feature muted">{t("Scores appear after the first answer is revealed.")}</div>
@@ -87,7 +98,7 @@ export function Present({ code }: { code: string }) {
       "popular",
     );
     const hl = qs.find((q) => q.highlighted);
-    const rest = qs.filter((q) => !q.highlighted).slice(0, hl ? 3 : 6);
+    const rest = qs.filter((q) => !q.highlighted).slice(0, hl ? 3 : 5);
     stage = (
       <>
         <div class="stage-label">
@@ -127,16 +138,8 @@ export function Present({ code }: { code: string }) {
         )}
       </>
     );
-  } else {
-    stage = (
-      <div style={{ marginTop: "16vh" }}>
-        <div class="stage-label">{s?.meta.title}</div>
-        <div class="feature" style={{ marginTop: "2vh", maxWidth: "16ch" }}>
-          {tj("Join at {host} and enter {code}", { host, code: <span style={{ color: "var(--brand)" }}>{code}</span> })}
-        </div>
-      </div>
-    );
   }
+  const announce = mode === "poll" && poll ? poll.title : mode === "leaderboard" ? t("Leaderboard") : t("Questions");
 
   return (
     <div class="present">
@@ -157,8 +160,72 @@ export function Present({ code }: { code: string }) {
           {t("{people} here", { people: plural(s?.online ?? 0, "person") })}
         </div>
       </aside>
-      <main aria-live="polite">{stage}</main>
+      <main>
+        <p class="sr-only" aria-live="polite">{announce}</p>
+        {stage}
+      </main>
       {floaters.layer}
+    </div>
+  );
+}
+
+/** Full-screen "how to join": big QR code, code and address. */
+function JoinHero({ code, host, s, floaters }: { code: string; host: string; s: Snapshot | null; floaters: ComponentChildren }) {
+  return (
+    <div class="present hero-mode">
+      <div class="hero-brand">
+        <Brand logo={s?.meta.settings.logo} code={code} />
+      </div>
+      <div class="hero">
+        <div class="hero-text">
+          {s && <div class="stage-label">{s.meta.title}</div>}
+          <div class="hero-step">{tj("Go to {host}", { host: <b>{host}</b> })}</div>
+          <div class="hero-step">{t("and enter the code")}</div>
+          <div class="hero-code" aria-label={t("Event code {code}", { code: code.split("").join(" ") })}>
+            {code}
+          </div>
+          <div class="hero-people num">{t("{people} here", { people: plural(s?.online ?? 0, "person") })}</div>
+        </div>
+        <div class="hero-qr">
+          <QrCode url={joinUrl(code)} />
+          <p>{t("Or scan to join")}</p>
+        </div>
+      </div>
+      {floaters}
+    </div>
+  );
+}
+
+/** "62% got it right" once a quiz answer is revealed. */
+function QuizHeadline({ poll, counts, total }: { poll: Poll; counts: number[]; total: number }) {
+  if (!total || !poll.correct?.length) return null;
+  const right = poll.correct.length === 1 ? (counts[poll.correct[0]] ?? 0) : Math.min(...poll.correct.map((c) => counts[c] ?? 0));
+  return <p class="quiz-headline">{t("{pct}% got it right", { pct: Math.round((right / total) * 100) })}</p>;
+}
+
+/** Surveys are long, so the big screen shows one question at a time, changing every 10 seconds. */
+function SurveyStage({ poll, results, code }: { poll: Poll; results: ReturnType<typeof resultsOf>; code: string }) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    if (poll.items.length < 2) return;
+    const id = setInterval(() => setI((n) => (n + 1) % poll.items.length), 10_000);
+    return () => clearInterval(id);
+  }, [poll.items.length]);
+  const idx = i % Math.max(1, poll.items.length);
+  const it = poll.items[idx];
+  if (!it) return null;
+  return (
+    <div class="survey-stage">
+      <div class="stage-label">
+        {t("Question {n} of {total}", { n: idx + 1, total: poll.items.length })}
+        <span class="dots" aria-hidden="true">
+          {poll.items.map((_, j) => (
+            <i key={j} class={j === idx ? "on" : ""} />
+          ))}
+        </span>
+      </div>
+      <h2>{it.title}</h2>
+      <ItemResults item={it} r={results.items?.[idx] ?? { total: 0 }} code={code} big />
     </div>
   );
 }
@@ -169,6 +236,7 @@ function QuizWaiting({ count, options }: { count: number; options: string[] }) {
       <div class="opts" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1.6vh 1.4vw" }}>
         {options.map((o, i) => (
           <div key={i} class={`opt tile q${i % 8}`} style={{ fontSize: "clamp(1.1rem, 1.8vw, 2.1rem)", minHeight: "11vh", cursor: "default" }}>
+            <span class="tile-letter" aria-hidden="true">{String.fromCharCode(65 + i)}</span>
             {o}
           </div>
         ))}

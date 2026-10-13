@@ -388,6 +388,8 @@ export type ClientMsg =
   | { type: "setPasscode"; passcode: string }
   | { type: "setPresentMode"; mode: PresentMode }
   | { type: "newModKey" }
+  /** Deletes the whole event now. `confirm` must be the event code. */
+  | { type: "deleteEvent"; confirm: string }
   | { type: "setApiKey"; on: boolean }
   | { type: "setWebhook"; url: string; events: WebhookEvent[] }
   | { type: "removeWebhook" }

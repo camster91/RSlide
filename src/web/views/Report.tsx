@@ -29,7 +29,7 @@ export function Report({ code }: { code: string }) {
   const votes = s.questions.reduce((n, q) => n + q.votes + q.downs, 0);
 
   return (
-    <div class="report">
+    <main class="report">
       <div class="spread no-print" style={{ marginBottom: 24 }}>
         <Brand />
         <button class="btn" onClick={() => print()}>
@@ -106,9 +106,9 @@ export function Report({ code }: { code: string }) {
             {plural(s.leaderboard.players, "player")}, {plural(s.leaderboard.rounds, "question")}
           </p>
           <Podium board={s.leaderboard} />
-          <Board board={s.leaderboard} from={3} />
+          <Board board={s.leaderboard} afterPodium />
         </section>
       )}
-    </div>
+    </main>
   );
 }

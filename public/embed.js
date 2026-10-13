@@ -29,7 +29,16 @@
     frame.style.cssText = "width:100%;height:" + height + "px;border:0;border-radius:16px;display:block;background:transparent";
     el.innerHTML = "";
     el.appendChild(frame);
+    if (view === "screen") frames.push(frame);
   }
+
+  // The live-results view tells us its height, so it never needs its own scrollbar.
+  var frames = [];
+  window.addEventListener("message", function (e) {
+    if (e.origin !== origin || !e.data || e.data.rslide !== "height") return;
+    for (var i = 0; i < frames.length; i++)
+      if (frames[i].contentWindow === e.source) frames[i].style.height = Math.max(240, Math.min(2000, e.data.h)) + "px";
+  });
 
   function run() {
     var els = document.querySelectorAll("[data-rslide]");

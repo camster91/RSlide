@@ -82,19 +82,22 @@ const TOAST = "rs-toast";
 export function toast(message: string) {
   window.dispatchEvent(new CustomEvent(TOAST, { detail: message }));
 }
-export function useToast(): string | null {
-  const [msg, setMsg] = useState<string | null>(null);
+/** The last message and whether it's showing. The text stays while it fades out, so no empty pill flashes. */
+export function useToast(): { msg: string; show: boolean } {
+  const [msg, setMsg] = useState("");
+  const [show, setShow] = useState(false);
   useEffect(() => {
     let t: ReturnType<typeof setTimeout>;
     const on = (e: Event) => {
       setMsg((e as CustomEvent<string>).detail);
+      setShow(true);
       clearTimeout(t);
-      t = setTimeout(() => setMsg(null), 2800);
+      t = setTimeout(() => setShow(false), 3200);
     };
     window.addEventListener(TOAST, on);
     return () => window.removeEventListener(TOAST, on);
   }, []);
-  return msg;
+  return { msg, show };
 }
 
 // ---------- routing ----------
