@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { Recap as RecapData } from "../../shared/protocol";
 import { CFG, plural, useTheme, useTitle } from "../lib/util";
-import { Board, Brand, Empty, LangPicker, Message, Podium, ResultsView, TYPE_LABEL } from "../components/ui";
+import { Board, Brand, Empty, LangPicker, Message, Podium, ResultsView, TeamBoard, TYPE_LABEL } from "../components/ui";
 import { t, tj, lang } from "../lib/i18n";
 
 /** Public recap of an event, shared by the host after it ends. */
@@ -104,6 +104,11 @@ export function Recap({ code }: { code: string }) {
           <p class="muted small" style={{ marginBottom: 16 }}>
             {plural(d.leaderboard.players, "player")}, {plural(d.leaderboard.rounds, "question")}
           </p>
+          {d.leaderboard.teams && d.leaderboard.teams.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <TeamBoard teams={d.leaderboard.teams} />
+            </div>
+          )}
           <Podium board={d.leaderboard} />
           <Board board={d.leaderboard} from={3} />
         </section>

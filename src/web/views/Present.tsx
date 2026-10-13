@@ -5,7 +5,7 @@ import { activePoll, resultsOf, sortQuestions } from "../../shared/store";
 import { useRoom } from "../lib/room";
 import { t, tj } from "../lib/i18n";
 import { CFG, joinUrl, plural, useTheme, useTitle } from "../lib/util";
-import { Board, Brand, ConnProblem, Confetti, Countdown, Icon, Podium, QrCode, ResultsView, TYPE_LABEL, useFloaters } from "../components/ui";
+import { Board, Brand, ConnProblem, Confetti, Countdown, Icon, Podium, QrCode, TeamBoard, ResultsView, TYPE_LABEL, useFloaters } from "../components/ui";
 
 export function Present({ code }: { code: string }) {
   const key = decodeURIComponent(location.hash.slice(1));
@@ -63,7 +63,15 @@ export function Present({ code }: { code: string }) {
           <Icon.trophy /> {t("{questions} played", { questions: plural(s.leaderboard.rounds, "question") })}
         </div>
         <h1>{t("Leaderboard")}</h1>
-        {s.leaderboard.top.length ? (
+        {s.leaderboard.top.length && s.leaderboard.teams?.length ? (
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.4fr) minmax(0,1fr)", gap: "4vw", alignItems: "start", marginTop: "3vh" }}>
+            <TeamBoard teams={s.leaderboard.teams} big />
+            <div>
+              <div class="stage-label">{t("Top players")}</div>
+              <Board board={s.leaderboard} limit={8} teams={s.meta.teams} />
+            </div>
+          </div>
+        ) : s.leaderboard.top.length ? (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr)", gap: "4vw", alignItems: "end" }}>
             <Podium board={s.leaderboard} />
             <Board board={s.leaderboard} from={3} />
@@ -206,7 +214,7 @@ function Overlay({ code, s, poll, mode, room, clockOffset, floaters }: {
         <div class="ov-kicker">
           <Icon.trophy /> {t("Leaderboard")}
         </div>
-        <Board board={s.leaderboard} limit={5} />
+        {s.leaderboard.teams?.length ? <TeamBoard teams={s.leaderboard.teams} limit={5} /> : <Board board={s.leaderboard} limit={5} />}
       </div>
     );
   } else if (mode === "qa" && hl) {

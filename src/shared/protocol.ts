@@ -121,6 +121,8 @@ export interface Meta {
   activePollId: string | null;
   labels: Label[];
   rooms: Room[];
+  /** Quiz teams. Empty = everyone plays alone. */
+  teams: Label[];
   /** Only sent to hosts. Empty string = no passcode. */
   passcode?: string;
   /** Only sent to hosts: the key for the moderator link. */
@@ -224,8 +226,24 @@ export type ResponseValue = Single | (Single | null)[];
 
 export interface LeaderEntry {
   name: string;
+  /** Team ID, when the event has teams. */
+  team?: string;
   points: number;
   correct: number;
+}
+
+export interface TeamScore {
+  id: string;
+  name: string;
+  color: LabelColor;
+  /** All points scored by the team. */
+  points: number;
+  /** Average points per player, used for ranking so team size doesn't matter. */
+  avg: number;
+  /** Players who have scored (answered a revealed quiz question). */
+  players: number;
+  /** Everyone on the team, playing or not. */
+  members: number;
 }
 
 export interface Leaderboard {
@@ -233,6 +251,8 @@ export interface Leaderboard {
   players: number;
   /** How many quiz questions have been revealed (and so count). */
   rounds: number;
+  /** Team scores, best first, when the event has teams. */
+  teams?: TeamScore[];
 }
 
 /** Things that belong to the person on this device. */
@@ -249,6 +269,8 @@ export interface Me {
   replies: string[];
   responses: Record<string, ResponseValue>;
   quiz: { points: number; rank: number; players: number; last: number | null } | null;
+  /** The quiz team this person is on. */
+  team: string | null;
 }
 
 export interface Snapshot {
@@ -320,6 +342,8 @@ export type ClientMsg =
   | { type: "withdraw"; id: string }
   | { type: "respond"; pollId: string; value: ResponseValue }
   | { type: "react"; emoji: Reaction }
+  /** Join a quiz team. "auto" picks the team with the fewest people. */
+  | { type: "joinTeam"; team: string }
   // host and moderators
   | { type: "approve" | "answer" | "archive" | "highlight" | "deleteQuestion"; id: string }
   | { type: "tagQuestion"; id: string; label: string }
@@ -331,6 +355,7 @@ export type ClientMsg =
   | { type: "setTitle"; title: string }
   | { type: "setLabels"; labels: { id?: string; name: string; color: LabelColor }[] }
   | { type: "setRooms"; rooms: { id?: string; name: string }[] }
+  | { type: "setTeams"; teams: { id?: string; name: string; color: LabelColor }[] }
   | { type: "importPolls"; polls: PollDraft[] }
   | { type: "setSettings"; settings: Partial<Settings> }
   | { type: "setPasscode"; passcode: string }
@@ -371,6 +396,7 @@ export interface EventTemplate {
   settings?: Partial<Settings>;
   labels?: { name: string; color: LabelColor }[];
   rooms?: { name: string }[];
+  teams?: { name: string; color: LabelColor }[];
   polls: PollDraft[];
 }
 

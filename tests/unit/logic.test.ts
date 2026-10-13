@@ -273,3 +273,29 @@ describe("labels and rooms", () => {
     expect(r).toHaveLength(2);
   });
 });
+
+import { teamScores } from "../../src/worker/logic";
+
+describe("team scores", () => {
+  const teams = [
+    { id: "a", name: "Alpha", color: "blue" as const },
+    { id: "b", name: "Bravo", color: "red" as const },
+    { id: "c", name: "Charlie", color: "green" as const },
+  ];
+  it("ranks by average so small teams can win", () => {
+    const teamOf = new Map([["p1", "a"], ["p2", "a"], ["p3", "a"], ["p4", "b"], ["p5", "b"]]);
+    const scores = new Map([["p1", { points: 500 }], ["p2", { points: 500 }], ["p3", { points: 500 }], ["p4", { points: 900 }]]);
+    const r = teamScores(teams, teamOf, scores);
+    expect(r.map((x) => x.id)).toEqual(["b", "a", "c"]);
+    expect(r[0]).toMatchObject({ points: 900, players: 1, members: 2, avg: 900 });
+    expect(r[1]).toMatchObject({ points: 1500, players: 3, members: 3, avg: 500 });
+    expect(r[2]).toMatchObject({ points: 0, players: 0, members: 0, avg: 0 });
+  });
+  it("ignores players without a team and breaks ties on total points", () => {
+    const teamOf = new Map([["p1", "a"], ["p2", "b"], ["p3", "b"]]);
+    const scores = new Map([["p1", { points: 600 }], ["p2", { points: 600 }], ["p3", { points: 600 }], ["solo", { points: 5000 }]]);
+    const r = teamScores(teams, teamOf, scores);
+    expect(r.map((x) => x.id)).toEqual(["b", "a", "c"]);
+    expect(r.reduce((n, x) => n + x.points, 0)).toBe(1800);
+  });
+});

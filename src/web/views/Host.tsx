@@ -24,7 +24,7 @@ import { parsePolls, type PasteResult } from "../../shared/paste";
 import { useRoom, type Send } from "../lib/room";
 import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, store, toast, uploadImage, useTheme, useTitle } from "../lib/util";
 import { t, tj } from "../lib/i18n";
-import { Board, ConnProblem, Countdown, Empty, Icon, LabelChip, Podium, QrCode, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
+import { Board, ConnProblem, Countdown, Empty, Icon, LabelChip, Podium, QrCode, TeamBoard, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
 
 type QTab = "live" | "pending" | "answered" | "archived";
 const Q_TABS: [QTab, string][] = [
@@ -296,8 +296,9 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
                     {s.meta.presentMode === "leaderboard" ? t("On big screen") : t("Show on big screen")}
                   </button>
                 </div>
+                {s.leaderboard.teams && s.leaderboard.teams.length > 0 && <TeamBoard teams={s.leaderboard.teams} />}
                 <Podium board={s.leaderboard} />
-                <Board board={s.leaderboard} from={3} />
+                <Board board={s.leaderboard} from={3} teams={s.meta.teams} />
               </div>
             )}
 
@@ -806,6 +807,10 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
         <p class="muted tiny">{t("Split Q&A into separate rooms, e.g. one per session or track. Attendees pick a room.")}</p>
         <RoomsEditor rooms={meta.rooms} code={code} hostKey={hostKey} onSave={(rooms) => send({ type: "setRooms", rooms })} />
 
+        <h3>{t("Quiz teams")}</h3>
+        <p class="muted tiny">{t("Add two or more teams to play quizzes in teams. People pick a team (or let the app pick) before they answer. Teams are ranked by average points, so team size doesn't matter.")}</p>
+        <LabelsEditor teams labels={meta.teams} onSave={(teams) => send({ type: "setTeams", teams })} />
+
         <h3>{t("Audience")}</h3>
         {Toggle({ k: "reactions", label: t("Emoji reactions"), hint: t("People can send 👏 ❤️ 🔥 to the big screen.") })}
         <p class="label">{t("Ask people for")}</p>
@@ -967,7 +972,7 @@ function SettingsDrawer({ code, hostKey, meta, send, onClose }: { code: string; 
   );
 }
 
-function LabelsEditor({ labels, onSave }: { labels: Label[]; onSave: (l: { id?: string; name: string; color: LabelColor }[]) => void }) {
+function LabelsEditor({ labels, onSave, teams = false }: { labels: Label[]; onSave: (l: { id?: string; name: string; color: LabelColor }[]) => void; teams?: boolean }) {
   const [list, setList] = useState(labels.map((l) => ({ ...l })));
   const [name, setName] = useState("");
   useEffect(() => setList(labels.map((l) => ({ ...l }))), [JSON.stringify(labels)]);
@@ -988,7 +993,7 @@ function LabelsEditor({ labels, onSave }: { labels: Label[]; onSave: (l: { id?: 
           </select>
           <LabelChip label={l} />
           <span class="grow" />
-          <button class="btn sm quiet" aria-label={t("Delete label {name}", { name: l.name })} onClick={() => save(list.filter((_, j) => j !== i))}>
+          <button class="btn sm quiet" aria-label={teams ? t("Delete team {name}", { name: l.name }) : t("Delete label {name}", { name: l.name })} onClick={() => save(list.filter((_, j) => j !== i))}>
             <Icon.x />
           </button>
         </div>
@@ -1002,7 +1007,7 @@ function LabelsEditor({ labels, onSave }: { labels: Label[]; onSave: (l: { id?: 
           setName("");
         }}
       >
-        <input class="input" maxLength={24} placeholder={t("New label, e.g. Finance")} value={name} onInput={(e) => setName(e.currentTarget.value)} />
+        <input class="input" maxLength={24} placeholder={teams ? t("New team, e.g. Red team") : t("New label, e.g. Finance")} value={name} onInput={(e) => setName(e.currentTarget.value)} />
         <button class="btn sm">{t("Add")}</button>
       </form>
     </div>

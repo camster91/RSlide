@@ -257,7 +257,7 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 - [ ] Public API + webhooks
 - [ ] PowerPoint web add-in
 - [x] Translations: English, French, Spanish (auto from the phone's language, menu to switch, `?lang=` for big screens)
-- [ ] Team quiz mode
+- [x] Team quiz mode (balanced auto-pick, ranked by average points, shown on the big screen, overlay, recap and Excel)
 
 ### Phase 4 — Enterprise-ready (after v1.0)
 - [ ] SSO (OIDC + SAML) and SCIM user provisioning

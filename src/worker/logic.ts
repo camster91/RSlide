@@ -3,6 +3,7 @@ import {
   ITEM_TYPES,
   LABEL_COLORS,
   LIMITS,
+  type TeamScore,
   POINTS_BUDGET,
   POLL_TYPES,
   type LabelColor,
@@ -445,4 +446,32 @@ export function resultsText(p: { type: string; title: string; options: string[];
       break;
   }
   return [head, ...lines.map((l) => `${pad}  - ${l}`)].join("\n");
+}
+
+/**
+ * Team standings. Teams are ranked by average points per player who played,
+ * so a team of 3 can beat a team of 12. Ties go to the team with more total points.
+ */
+export function teamScores(
+  teams: { id: string; name: string; color: LabelColor }[],
+  teamOf: Map<string, string>,
+  scores: Map<string, { points: number }>,
+): TeamScore[] {
+  const members = new Map<string, number>();
+  for (const t of teamOf.values()) members.set(t, (members.get(t) ?? 0) + 1);
+  const totals = new Map<string, { points: number; players: number }>();
+  for (const [pid, s] of scores) {
+    const team = teamOf.get(pid);
+    if (!team) continue;
+    const cur = totals.get(team) ?? { points: 0, players: 0 };
+    cur.points += s.points;
+    cur.players++;
+    totals.set(team, cur);
+  }
+  return teams
+    .map((t) => {
+      const x = totals.get(t.id) ?? { points: 0, players: 0 };
+      return { id: t.id, name: t.name, color: t.color, points: x.points, players: x.players, members: members.get(t.id) ?? 0, avg: x.players ? Math.round(x.points / x.players) : 0 };
+    })
+    .sort((a, b) => b.avg - a.avg || b.points - a.points || a.name.localeCompare(b.name));
 }

@@ -3,7 +3,7 @@ import type { Meta, Poll, Question, Snapshot } from "../../src/shared/protocol";
 import { DEFAULT_SETTINGS } from "../../src/shared/protocol";
 import { applyOps, emptyRoom, reduce, secondsLeft, sortQuestions } from "../../src/shared/store";
 
-const meta: Meta = { code: "ABC123", title: "T", settings: DEFAULT_SETTINGS, presentMode: "auto", activePollId: null, labels: [], rooms: [], recapPublic: false };
+const meta: Meta = { code: "ABC123", title: "T", settings: DEFAULT_SETTINGS, presentMode: "auto", activePollId: null, labels: [], rooms: [], teams: [], recapPublic: false };
 const q = (id: string, votes = 0, ts = 0, extra: Partial<Question> = {}): Question => ({ id, text: id, name: "", ts, votes, downs: 0, status: "live", highlighted: false, edited: false, room: "main", labels: [], replies: [], ...extra });
 const poll = (id: string, ord: number, extra: Partial<Poll> = {}): Poll => ({ id, ord, type: "rating", title: id, options: [], images: [], multi: false, scale: 5, range: null, axes: null, image: null, status: "draft", showResults: true, revealed: false, timeLimit: 0, startedAt: null, items: [], ...extra });
 const snap = (over: Partial<Snapshot> = {}): Snapshot => ({ meta, questions: [], polls: [], results: {}, leaderboard: { top: [], players: 0, rounds: 0 }, online: 0, ...over });
@@ -41,7 +41,7 @@ describe("reduce", () => {
     expect(reduce(emptyRoom(), { type: "patch", ops: [{ k: "q", d: q("a") }] }).snapshot).toBeNull();
   });
   it("hello sets everything, online updates count", () => {
-    let s = reduce(emptyRoom(), { type: "hello", role: "attendee", snapshot: snap(), now: Date.now() + 5000, me: { pid: "p", name: "", email: "", joined: true, votes: [], downs: [], questions: [], replies: [], responses: {}, quiz: null } });
+    let s = reduce(emptyRoom(), { type: "hello", role: "attendee", snapshot: snap(), now: Date.now() + 5000, me: { pid: "p", name: "", email: "", joined: true, votes: [], downs: [], questions: [], replies: [], responses: {}, quiz: null, team: null } });
     expect(s.clockOffset).toBeGreaterThan(4000);
     s = reduce(s, { type: "online", n: 42 });
     expect(s.role).toBe("attendee");

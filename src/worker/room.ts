@@ -51,6 +51,7 @@ import {
   normPasscode,
   quizPoints,
   resultsText,
+  teamScores,
   RateLimiter,
   tally,
   toCsv,
@@ -91,6 +92,7 @@ interface EventRecord {
   stats: { peakOnline: number; peakAt: number | null };
   /** Public recap page: shared or not, and the host's summary. */
   recap: { public: boolean; summary: string };
+  teams: Label[];
 }
 
 interface Attachment {
@@ -217,6 +219,7 @@ export class EventRoom extends DurableObject<Env> {
         this.ev.rooms ??= [];
         this.ev.stats ??= { peakOnline: 0, peakAt: null };
         this.ev.recap ??= { public: false, summary: "" };
+        this.ev.teams ??= [];
       }
     });
   }
@@ -273,6 +276,8 @@ export class EventRoom extends DurableObject<Env> {
     // v0.4: Smart Q&A
     this.addColumn("questions", "dup_of", "TEXT");
     this.sql.exec("CREATE TABLE IF NOT EXISTS vectors (qid TEXT PRIMARY KEY, room TEXT NOT NULL, vec BLOB NOT NULL)");
+    // v0.7: quiz teams
+    this.addColumn("participants", "team", "TEXT");
   }
 
   private addColumn(table: string, column: string, def: string) {
@@ -299,6 +304,7 @@ export class EventRoom extends DurableObject<Env> {
       rooms: [],
       stats: { peakOnline: 0, peakAt: null },
       recap: { public: false, summary: "" },
+      teams: [],
     };
     this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('event', ?)", JSON.stringify(ev));
     for (const q of old.questions ?? []) {
@@ -347,6 +353,7 @@ export class EventRoom extends DurableObject<Env> {
       rooms: [],
       stats: { peakOnline: 0, peakAt: null },
       recap: { public: false, summary: "" },
+      teams: [],
     };
     this.persistEvent();
     await this.scheduleAlarm();
@@ -397,6 +404,7 @@ export class EventRoom extends DurableObject<Env> {
         settings: { qaOpen, moderation, allowAnonymous, allowDownvotes, reactions, identity, theme, screen, audienceReplies, hideNames, profanity, blockedWords, logo },
         labels: ev.labels.map(({ name, color }) => ({ name, color })),
         rooms: ev.rooms.map(({ name }) => ({ name })),
+        teams: ev.teams.map(({ name, color }) => ({ name, color })),
         polls,
       },
       media: [...media],
@@ -409,6 +417,7 @@ export class EventRoom extends DurableObject<Env> {
     this.applySettings(t.settings ?? {});
     if (t.labels?.length) this.ev.labels = cleanLabels(t.labels, newId);
     if (t.rooms?.length) this.ev.rooms = this.withMainRoom(cleanRooms(t.rooms, newId));
+    if (t.teams?.length) this.ev.teams = cleanLabels(t.teams, newId);
     let n = 0;
     for (const d of (t.polls ?? []).slice(0, LIMITS.importPolls)) {
       try {
@@ -477,6 +486,13 @@ export class EventRoom extends DurableObject<Env> {
     sheets.push({ name: "All answers", rows: responses });
 
     const lb = this.leaderboard();
+    const teamIds = this.ev!.teams.length ? new Map(this.sql.exec<{ pid: string; team: string }>("SELECT pid, team FROM participants WHERE team IS NOT NULL").toArray().map((r) => [r.pid, r.team])) : null;
+    const teamName = teamIds ? (pid: string) => this.ev!.teams.find((t) => t.id === teamIds.get(pid))?.name ?? "" : null;
+    if (lb.board.rounds > 0 && lb.board.teams?.length)
+      sheets.push({
+        name: "Team leaderboard",
+        rows: [["Rank", "Team", "Average points", "Total points", "Players", "Members"], ...lb.board.teams.map((t, i) => [i + 1, t.name, t.avg, t.points, t.players, t.members] as Cell[])],
+      });
     if (lb.board.rounds > 0)
       sheets.push({
         name: "Quiz leaderboard",
@@ -485,7 +501,7 @@ export class EventRoom extends DurableObject<Env> {
 
     const people = [...names.entries()].filter(([, p]) => p.name || p.email);
     if (people.length)
-      sheets.push({ name: "Participants", rows: [["Name", "Email", "Joined at"], ...people.map(([, p]) => [p.name, p.email, new Date(p.joinedAt).toISOString()] as Cell[])] });
+      sheets.push({ name: "Participants", rows: [["Name", "Email", "Joined at", ...(teamName ? ["Team"] : [])], ...people.map(([pid, p]) => [p.name, p.email, new Date(p.joinedAt).toISOString(), ...(teamName ? [teamName(pid)] : [])] as Cell[])] });
 
     return buildXlsx(sheets);
   }
@@ -769,6 +785,21 @@ export class EventRoom extends DurableObject<Env> {
     return this.sql.exec<{ name: string; email: string }>("SELECT name, email FROM participants WHERE pid = ?", pid).toArray()[0] ?? null;
   }
 
+  private teamOf(pid: string): string | undefined {
+    return this.sql.exec<{ team: string | null }>("SELECT team FROM participants WHERE pid = ?", pid).toArray()[0]?.team ?? undefined;
+  }
+
+  private teamCounts(): Map<string, number> {
+    const m = new Map<string, number>();
+    for (const r of this.sql.exec<{ team: string; n: number }>("SELECT team, COUNT(*) AS n FROM participants WHERE team IS NOT NULL GROUP BY team")) m.set(r.team, r.n);
+    return m;
+  }
+
+  /** True once they've answered any quiz question (so their team is locked in). */
+  private playedQuiz(pid: string): boolean {
+    return this.sql.exec("SELECT 1 FROM responses r JOIN polls p ON p.id = r.poll_id WHERE r.pid = ? AND p.type = 'quiz' LIMIT 1", pid).toArray().length > 0;
+  }
+
   private participantNames(): Map<string, { name: string; email: string; joinedAt: number }> {
     const m = new Map<string, { name: string; email: string; joinedAt: number }>();
     for (const r of this.sql.exec<{ pid: string; name: string; email: string; joined_at: number }>("SELECT * FROM participants"))
@@ -944,6 +975,7 @@ export class EventRoom extends DurableObject<Env> {
           if (p.revealed) throw new UserError("Answers are closed — the answer has been revealed");
           if (p.timeLimit && p.startedAt && now > p.startedAt + p.timeLimit * 1000 + QUIZ_GRACE_MS) throw new UserError("Time's up!");
           if (this.sql.exec("SELECT 1 FROM responses WHERE poll_id = ? AND pid = ?", p.id, pid).toArray().length) throw new UserError("You've already answered this one");
+          if (ev.teams.length && !isStaff(role) && !this.teamOf(pid)) throw new UserError("Pick a team first");
           elapsed = p.startedAt ? Math.max(0, now - p.startedAt) : 0;
         }
         const value = this.filterAnswer(p, validateResponse(p, msg.value), role);
@@ -953,6 +985,23 @@ export class EventRoom extends DurableObject<Env> {
         );
         this.track("answer");
         this.touchR(p.id);
+        this.touchMe(pid);
+        return true;
+      }
+      case "joinTeam": {
+        if (!ev.teams.length) throw new UserError("This event doesn't have teams");
+        this.requireJoined(pid, role);
+        const counts = this.teamCounts();
+        const team = msg.team === "auto" ? [...ev.teams].sort((a, b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0))[0].id : String(msg.team);
+        if (!ev.teams.some((t) => t.id === team)) throw new UserError("That team doesn't exist any more");
+        const cur = this.teamOf(pid);
+        if (cur === team) return true;
+        if (cur && this.playedQuiz(pid)) throw new UserError("You've already played for your team");
+        this.sql.exec(
+          "INSERT INTO participants (pid, name, email, joined_at, team) VALUES (?,'','',?,?) ON CONFLICT(pid) DO UPDATE SET team = excluded.team",
+          pid, Date.now(), team,
+        );
+        this.invalidateLb();
         this.touchMe(pid);
         return true;
       }
@@ -1202,6 +1251,16 @@ export class EventRoom extends DurableObject<Env> {
           } catch {}
         }
         return this.saveEvent();
+      case "setTeams": {
+        ev.teams = cleanLabels(msg.teams, newId);
+        const keep = ev.teams.map((t) => t.id);
+        // People on a removed team go back to having none.
+        if (keep.length) this.sql.exec(`UPDATE participants SET team = NULL WHERE team IS NOT NULL AND team NOT IN (${keep.map(() => "?").join(",")})`, ...keep);
+        else this.sql.exec("UPDATE participants SET team = NULL WHERE team IS NOT NULL");
+        this.invalidateLb();
+        this.dirtyAllMe = true;
+        return this.saveEvent();
+      }
       case "setLabels": {
         ev.labels = cleanLabels(msg.labels, newId);
         const keep = new Set(ev.labels.map((l) => l.id));
@@ -1509,12 +1568,16 @@ export class EventRoom extends DurableObject<Env> {
     const rank = new Map<string, number>();
     ranked.forEach((r, i) => rank.set(r.pid, i > 0 && ranked[i - 1].points === r.points ? rank.get(ranked[i - 1].pid)! : i + 1));
     const names = ranked.length ? this.participantNames() : new Map();
+    const teamIds = this.ev?.teams.length ? new Map(this.sql.exec<{ pid: string; team: string }>("SELECT pid, team FROM participants WHERE team IS NOT NULL").toArray().map((r) => [r.pid, r.team])) : null;
     const top = ranked.slice(0, 10).map((r) => ({
       name: names.get(r.pid)?.name || `Player ${r.pid.slice(-4).toUpperCase()}`,
       points: r.points,
       correct: byPid.get(r.pid)!.correct,
+      ...(teamIds?.get(r.pid) ? { team: teamIds.get(r.pid) } : {}),
     }));
-    this.lbCache = { board: { top, players: ranked.length, rounds: quizzes.length }, byPid, perPoll, ranked, rank };
+    const board: Leaderboard = { top, players: ranked.length, rounds: quizzes.length };
+    if (teamIds) board.teams = teamScores(this.ev!.teams, teamIds, byPid);
+    this.lbCache = { board, byPid, perPoll, ranked, rank };
     return this.lbCache;
   }
 
@@ -1546,6 +1609,7 @@ export class EventRoom extends DurableObject<Env> {
       replies: this.sql.exec<{ id: string }>("SELECT id FROM replies WHERE pid = ?", pid).toArray().map((r) => r.id),
       responses,
       quiz,
+      team: this.ev?.teams.length ? (this.teamOf(pid) ?? null) : null,
     };
   }
 
@@ -1562,6 +1626,7 @@ export class EventRoom extends DurableObject<Env> {
       activePollId: ev.activePollId,
       labels: ev.labels,
       rooms: ev.rooms,
+      teams: ev.teams,
       recapPublic: ev.recap.public,
       ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey, ai: aiAvailable(this.env), recapSummary: ev.recap.summary } : {}),
     };

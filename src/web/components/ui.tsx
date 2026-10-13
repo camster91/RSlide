@@ -1,6 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { Item, Label, Leaderboard, Poll, PollType, Question, Reaction, Reply, Results as ResultsData } from "../../shared/protocol";
+import type { Item, Label, Leaderboard, TeamScore, Poll, PollType, Question, Reaction, Reply, Results as ResultsData } from "../../shared/protocol";
 import { POINTS_BUDGET } from "../../shared/protocol";
 import { secondsLeft } from "../../shared/store";
 import type { ConnStatus } from "../lib/room";
@@ -417,7 +417,7 @@ export function Podium({ board }: { board: Leaderboard }) {
   );
 }
 
-export function Board({ board, from = 0, limit = 10 }: { board: Leaderboard; from?: number; limit?: number }) {
+export function Board({ board, from = 0, limit = 10, teams }: { board: Leaderboard; from?: number; limit?: number; teams?: Label[] }) {
   const rows = board.top.slice(from, limit);
   if (!rows.length) return null;
   return (
@@ -425,9 +425,46 @@ export function Board({ board, from = 0, limit = 10 }: { board: Leaderboard; fro
       {rows.map((e, i) => (
         <li key={i}>
           <span class="rank">{from + i + 1}</span>
-          <span class="grow">{e.name}</span>
+          <span class="grow">
+            {e.name}
+            {teams && e.team && <TeamDot team={teams.find((x) => x.id === e.team)} />}
+          </span>
           <span class="muted small">{plural(e.correct, "correct answer")}</span>
           <span class="pts">{e.points.toLocaleString(lang)}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function TeamDot({ team }: { team?: Label }) {
+  if (!team) return null;
+  return (
+    <span class={`team-dot c-${team.color}`} title={team.name}>
+      <span class="sr-only">{t("Team {name}", { name: team.name })}</span>
+    </span>
+  );
+}
+
+/** Team standings as bars, ranked by average points per player. */
+export function TeamBoard({ teams, big = false, limit = 12, mine }: { teams: TeamScore[]; big?: boolean; limit?: number; mine?: string | null }) {
+  const rows = teams.slice(0, limit);
+  const max = Math.max(1, ...rows.map((x) => x.avg));
+  return (
+    <ol class={`team-board ${big ? "big" : ""}`}>
+      {rows.map((x, i) => (
+        <li key={x.id} class={`c-${x.color} ${x.id === mine ? "mine" : ""}`}>
+          <div class="tb-head">
+            <span class="rank">{i + 1}</span>
+            <b class="grow">{x.name}</b>
+            <span class="pts">{t("{n} avg", { n: x.avg })}</span>
+          </div>
+          <div class="tb-bar" aria-hidden="true">
+            <span style={{ width: `${(x.avg / max) * 100}%` }} />
+          </div>
+          <div class="muted small">
+            {t("{points} in total · {players} played", { points: plural(x.points, "point"), players: plural(x.players, "player") })}
+          </div>
         </li>
       ))}
     </ol>

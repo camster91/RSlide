@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { MAIN_ROOM, POINTS_BUDGET, REACTIONS, type EventInfo, type Item, type Label, type Poll, type Question, type ResponseValue, type Results } from "../../shared/protocol";
+import { MAIN_ROOM, POINTS_BUDGET, REACTIONS, type EventInfo, type Item, type Label, type Leaderboard, type Poll, type Question, type ResponseValue, type Results } from "../../shared/protocol";
 import { activePoll, resultsOf, secondsLeft, sortQuestions } from "../../shared/store";
 import { findSimilar } from "../../shared/similar";
 import { useRoom, type Send } from "../lib/room";
 import { t, tj, lang } from "../lib/i18n";
 import { CFG, fetchEvent, mediaUrl, passcodeFor, plural, savePasscode, store, toast, useTheme, useTitle } from "../lib/util";
-import { Board, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, PinMap, Podium, QuestionLabels, Replies, whenText, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
+import { Board, LabelChip, TeamBoard, ConnDot, ConnProblem, Confetti, Countdown, Empty, Icon, PinMap, Podium, QuestionLabels, Replies, whenText, QuestionMeta, ResultsView, TopBar, TYPE_LABEL, useTick } from "../components/ui";
 
 type Tab = "qa" | "polls" | "board";
 
@@ -143,7 +143,9 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
       </TopBar>
       <main class="wrap stack">
         {current === "qa" && <QATab s={s} me={me} send={send} />}
-        {current === "polls" && (poll ? <PollAnswer key={poll.id} code={code} poll={poll} results={resultsOf(s, poll.id)} me={me} clockOffset={state.clockOffset} send={send} /> : <NoPoll />)}
+        {current === "polls" && s.meta.teams.length > 0 && !me.team && <TeamPicker teams={s.meta.teams} board={s.leaderboard} send={send} quizLive={poll?.type === "quiz"} />}
+        {current === "polls" && (poll ? (poll.type === "quiz" && s.meta.teams.length > 0 && !me.team && !me.responses[poll.id] ? null : <PollAnswer key={poll.id} code={code} poll={poll} results={resultsOf(s, poll.id)} me={me} clockOffset={state.clockOffset} send={send} />) : <NoPoll />)}
+        {current === "polls" && me.team && <MyTeam team={s.meta.teams.find((x) => x.id === me.team)} />}
         {current === "board" && <BoardTab s={s} me={me} />}
         {s.meta.settings.reactions && current !== "board" && <ReactBar send={send} />}
       </main>
@@ -165,6 +167,39 @@ function Live({ code, passcode, onBadPasscode }: { code: string; passcode: strin
         )}
       </nav>
     </>
+  );
+}
+
+/** Quiz teams: pick one, or let the app balance the teams. */
+function TeamPicker({ teams, board, send, quizLive }: { teams: Label[]; board: Leaderboard; send: Send; quizLive: boolean }) {
+  const members = new Map((board.teams ?? []).map((x) => [x.id, x.members]));
+  return (
+    <div class="poll-card team-pick">
+      <h2>{t("Pick your team")}</h2>
+      <p class="muted small">{quizLive ? t("A quiz is on. Pick a team to play.") : t("Quizzes in this event are played in teams.")}</p>
+      <div class="teams">
+        {teams.map((x) => (
+          <button key={x.id} class={`team-btn c-${x.color}`} onClick={() => send({ type: "joinTeam", team: x.id })}>
+            <span>
+              {x.name}
+              {members.has(x.id) && <small>{plural(members.get(x.id)!, "player")}</small>}
+            </span>
+          </button>
+        ))}
+      </div>
+      <button class="btn ghost" onClick={() => send({ type: "joinTeam", team: "auto" })}>
+        {t("Pick for me")}
+      </button>
+    </div>
+  );
+}
+
+function MyTeam({ team }: { team?: Label }) {
+  if (!team) return null;
+  return (
+    <p class="muted small my-team" style={{ textAlign: "center" }}>
+      {tj("You're on {team}", { team: <LabelChip label={team} /> })}
+    </p>
   );
 }
 
@@ -943,8 +978,15 @@ function BoardTab({ s, me }: { s: NonNullable<ReturnType<typeof useRoom>["state"
       <div class="poll-card stack">
         <h2>{t("Leaderboard")}</h2>
         <p class="muted small">{t("{questions} revealed so far.", { questions: plural(lb.rounds, "question") })}</p>
+        {lb.teams && lb.teams.length > 0 && (
+          <>
+            <h3>{t("Teams")}</h3>
+            <TeamBoard teams={lb.teams} mine={me.team} />
+            <h3>{t("Players")}</h3>
+          </>
+        )}
         <Podium board={lb} />
-        <Board board={lb} from={3} />
+        <Board board={lb} from={3} teams={s.meta.teams} />
       </div>
     </>
   );

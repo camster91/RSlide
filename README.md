@@ -22,6 +22,7 @@
 - Pick a Q&A room when an event has several (e.g. one per session)
 - Answer 11 kinds of polls: multiple choice, quiz, rating, scale, ranking, word cloud, open text, 100 points, 2×2 grid, pin on image and multi-question surveys
 - Quiz mode with a countdown, points for speed and a live leaderboard
+- **Team quizzes**: pick a team (or "Pick for me" to balance them); teams are ranked by average points so size doesn't matter
 - Send emoji reactions that float up the big screen
 - Works in light and dark mode, sized for one-handed phone use
 - **English, French and Spanish**: the app follows each phone's language, with a menu to switch
@@ -151,7 +152,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for a deeper tour.
 See the full product plan in **[docs/ROADMAP.md](docs/ROADMAP.md)** — Slido Pro feature parity, design direction, architecture and release phases.
 
 Done: Slido Pro-level Q&A, polls, quizzes, moderation, analytics and exports (v0.1–v0.3), plus repeat-question merging, phone remote, stream overlay and website embed (v0.4), and paste-to-polls and recap pages (v0.5).
-Next up: team quizzes, public API and webhooks, host accounts.
+Next up: public API and webhooks, host accounts.
 
 Contributions welcome — read [CONTRIBUTING.md](CONTRIBUTING.md), pick any unchecked item and open an issue.
 
