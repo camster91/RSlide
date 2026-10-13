@@ -2,7 +2,7 @@
 
 **Goal:** Everything Slido's Pro plan does, plus the things it doesn't — free, open source (MIT), and deployable in one command.
 
-Last updated: October 2026 · Phases 0–2 done (v0.3), except the public demo and host accounts
+Last updated: October 2026 · Phases 0–2 done, Phase 3 mostly done (v0.9). Still to do: the public demo and the PowerPoint add-in
 
 ---
 
@@ -85,7 +85,7 @@ The two real advantages to protect:
 | Show/hide results from audience | Free | ✅ |
 | CSV export | Engage | ✅ |
 | Excel + PDF export | Engage | ✅ |
-| Host accounts + event dashboard | Free | 🔜 next (needs email) |
+| Host accounts + event dashboard | Free | ✅ v0.9 |
 | Co-hosts and moderators | Engage/Pro | ✅ moderator link |
 | Duplicate an event / reuse polls | Free | ✅ |
 | Templates (icebreakers, retros, NPS…) | Free | ✅ |
@@ -236,7 +236,7 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 - [x] Excel export + printable report (save as PDF)
 
 ### Phase 2 — Pro parity (weeks 5–8) → **v0.3** ✅ (except accounts)
-- [ ] Host accounts (magic link) + dashboard of events — *needs an email service; see open decisions*
+- [x] Host accounts (email sign-in link) + "My events" dashboard. Works with Cloudflare Email Service or Resend
 - [x] Co-hosts and moderators — *moderator link; share the host link for a full co-host*
 - [x] Duplicate events, template gallery (7 built-in templates)
 - [x] Q&A replies, labels, multiple rooms (with a big-screen link per room)
@@ -322,7 +322,7 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 
 ## 11. Open decisions
 
-1. **Email for host sign-in (magic links).** Options: Cloudflare Email Service (needs a domain on Cloudflare), or a provider like Resend or Postmark (needs an API key). Self-hosters without email could sign in with a one-time code shown in the server log.
+1. ~~Email for host sign-in~~: both are supported. Cloudflare Email Service (`send_email` binding, Workers paid plan) or Resend (`RESEND_API_KEY`), with `EMAIL_FROM`.
 2. **Live demo domain:** a free `*.workers.dev` URL vs a custom domain (e.g. `rslide.app`).
 3. **Hosted paid version:** plan for it now (affects account/billing design) or later.
-4. **First AI feature:** duplicate-question merging (recommended — most useful in big rooms) vs paste-to-polls.
+4. ~~First AI feature~~: done. Duplicate merging, paste-to-polls and recap summaries are all in (v0.4–v0.5).

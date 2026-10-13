@@ -21,6 +21,8 @@ const Report = lazy(() => import("./views/Report").then((m) => m.Report));
 const Analytics = lazy(() => import("./views/Analytics").then((m) => m.Analytics));
 const Remote = lazy(() => import("./views/Remote").then((m) => m.Remote));
 const Recap = lazy(() => import("./views/Recap").then((m) => m.Recap));
+const SignIn = lazy(() => import("./views/Account").then((m) => m.SignIn));
+const MyEvents = lazy(() => import("./views/Account").then((m) => m.MyEvents));
 
 function Router() {
   const path = useLocation();
@@ -34,6 +36,8 @@ function Router() {
   if (a === "report" && code) return <Report key={code} code={code} />;
   if (a === "remote" && code) return <Remote key={code} code={code} />;
   if (a === "recap" && code) return <Recap key={code} code={code} />;
+  if (a === "signin") return <SignIn />;
+  if (a === "events" && !b) return <MyEvents />;
   // Short links like yoursite.com/ABC123
   if (a && /^[A-Za-z0-9]{4,8}$/.test(a) && !b) {
     queueMicrotask(() => navigate(`/e/${a.toUpperCase()}`));

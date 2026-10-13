@@ -24,6 +24,7 @@ import {
 import { resultsOf, sortQuestions } from "../../shared/store";
 import { TEMPLATES } from "../../shared/templates";
 import { parsePolls, type PasteResult } from "../../shared/paste";
+import { saveToAccount } from "../lib/account";
 import { useRoom, type Send } from "../lib/room";
 import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, store, toast, uploadImage, useTheme, useTitle } from "../lib/util";
 import { t, tj } from "../lib/i18n";
@@ -79,7 +80,10 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   useTitle(s ? (moderator ? t("Moderate: {title}", { title: s.meta.title }) : t("Host: {title}", { title: s.meta.title })) : CFG.name);
   useTheme(s?.meta.settings.theme);
   useEffect(() => {
-    if (s && !moderator) rememberHosted({ code, key, title: s.meta.title, ts: Date.now() });
+    if (s && !moderator) {
+      rememberHosted({ code, key, title: s.meta.title, ts: Date.now() });
+      void saveToAccount({ code, key });
+    }
   }, [!!s]);
 
   if (!key || status === "forbidden") return <ConnProblem status="forbidden" code={code} />;

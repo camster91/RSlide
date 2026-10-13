@@ -28,6 +28,7 @@
 - **English, French and Spanish**: the app follows each phone's language, with a menu to switch
 
 **Hosts** — `/host/CODE#hostkey` (private link, given when you create an event)
+- Optional **host accounts**: sign in with an emailed link (no password) to see all your events on any device. Hosting without an account still works
 - Q&A moderation: review first, show on screen, mark answered, archive, delete, reply, label, move between rooms
 - **Repeat-question hints**: similar questions are flagged, and one click merges them (votes and replies move over). Optional AI help catches repeats worded differently or in another language
 - **Phone remote** (`/remote/CODE`): scan a QR code and run polls and pick questions from the stage
@@ -95,6 +96,10 @@ Set these under `vars` in `wrangler.jsonc` (or in the Cloudflare dashboard):
 | `MAX_PARTICIPANTS` | Most attendees allowed in one event at the same time. | `0` (no limit) |
 | `MEDIA` (R2 bucket) | Stores images on poll options. Remove the `r2_buckets` block to turn image uploads off. | `rslide-media` |
 | `AI` (Workers AI binding) | Optional. Turns on AI help: catching repeat questions (multilingual), notes-to-polls and recap summaries. Add `"ai": { "binding": "AI" }` to `wrangler.jsonc`. Local dev then needs `wrangler login`. | off |
+| `EMAIL_FROM` | Sender address for sign-in emails, on a domain you've verified. Host accounts switch on once this and one email option below are set. | empty (accounts off) |
+| `send_email` binding | Send sign-in emails with Cloudflare Email Service (Workers paid plan). Uncomment it in `wrangler.jsonc`. | off |
+| `RESEND_API_KEY` | Or send them with [Resend](https://resend.com). Set it as a secret: `npx wrangler secret put RESEND_API_KEY`. | empty |
+| `APP_NAME` | Name used in sign-in emails. | `RSlide` |
 | `AI_ACCOUNT_ID` + `AI_API_TOKEN` | Optional. The same AI help, using a Workers AI API token instead of a binding. Set them as secrets. | empty |
 
 Repeat-question hints and paste-to-polls work without any AI. They run on your own server and send nothing elsewhere. AI repeat-checking is off for every event until the host turns it on. AI polls and AI summaries only run when the host presses the button, and the host checks the result before anyone sees it.
@@ -129,7 +134,17 @@ Browser ──HTTP──▶ Worker (src/worker/index.ts) ──▶ web app (Prea
 npm run typecheck
 npm test                     # unit tests
 npm run preview              # start the built app on http://localhost:8787, then in a second terminal:
-npm run test:e2e             # 300+ end-to-end checks (add WEBHOOK_ALLOW_PRIVATE="1" to .dev.vars to include webhook delivery) with hosts, moderators, attendees and a big screen
+npm run test:e2e             # 340+ end-to-end checks
+```
+
+For the full set, create a `.dev.vars` file (it's git-ignored) **before** `npm run build`:
+
+```
+WEBHOOK_ALLOW_PRIVATE="1"   # webhook tests deliver to a receiver on your machine
+AUTH_DEV_LINKS="1"          # sign-in links come back in the response instead of by email (only ever works on localhost)
+```
+
+```bash
 npm run test:load -- 2000    # 2,000 simulated attendees: poll, upvotes and a quiz reveal
 ```
 
@@ -153,7 +168,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for a deeper tour.
 See the full product plan in **[docs/ROADMAP.md](docs/ROADMAP.md)** — Slido Pro feature parity, design direction, architecture and release phases.
 
 Done: Slido Pro-level Q&A, polls, quizzes, moderation, analytics and exports (v0.1–v0.3), plus repeat-question merging, phone remote, stream overlay and website embed (v0.4), and paste-to-polls and recap pages (v0.5).
-Next up: host accounts.
+Next up: the PowerPoint add-in, then SSO for organisations (see the roadmap).
 
 Contributions welcome — read [CONTRIBUTING.md](CONTRIBUTING.md), pick any unchecked item and open an issue.
 

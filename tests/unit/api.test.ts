@@ -56,3 +56,40 @@ async function hmac(secret: string, msg: string) {
   const { createHmac } = await import("node:crypto");
   return createHmac("sha256", secret).update(msg).digest("hex");
 }
+
+import { devMode, signInEmail } from "../../src/worker/mail";
+import { accountId, isEmail, normEmail } from "../../src/worker/identity";
+
+describe("sign-in email", () => {
+  it("is in the reader's language, with the link in text and HTML", () => {
+    const link = "https://rs.example/signin?a=1&t=2";
+    const en = signInEmail("RSlide", link, "en");
+    expect(en.subject).toBe("Your sign-in link for RSlide");
+    expect(en.text).toContain(link);
+    expect(en.html).toContain("https://rs.example/signin?a=1&#38;t=2");
+    expect(signInEmail("RSlide", link, "fr").subject).toContain("connexion");
+    expect(signInEmail("RSlide", link, "es").subject).toContain("entrar");
+    expect(signInEmail("RSlide", link, "de").subject).toBe(en.subject);
+  });
+  it("escapes the app name", () => {
+    expect(signInEmail("<b>X</b>", "https://x", "en").html).not.toContain("<b>X</b>");
+  });
+  it("normalizes emails into one account", async () => {
+    expect(normEmail("  Ann@Example.COM ")).toBe("ann@example.com");
+    expect(isEmail("ann@example.com")).toBe(true);
+    expect(isEmail("ann@example")).toBe(false);
+    expect(await accountId("Ann@Example.com")).toBe(await accountId("ann@example.com "));
+    expect(await accountId("ann@example.com")).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe("development sign-in links", () => {
+  it("only work on this machine", () => {
+    const env = { AUTH_DEV_LINKS: "1" };
+    expect(devMode(env, "localhost")).toBe(true);
+    expect(devMode(env, "127.0.0.1")).toBe(true);
+    expect(devMode(env, "rslide.example.com")).toBe(false);
+    expect(devMode(env, "rslide.workers.dev")).toBe(false);
+    expect(devMode({}, "localhost")).toBe(false);
+  });
+});

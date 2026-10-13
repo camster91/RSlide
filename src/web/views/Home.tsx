@@ -3,11 +3,14 @@ import { CFG, fetchEvent, navigate, normCode, rememberHosted, store, toast, useT
 import { Brand, LangPicker } from "../components/ui";
 import { TEMPLATES } from "../../shared/templates";
 import { t } from "../lib/i18n";
+import { useAccount } from "../lib/account";
 
 export function Home() {
   useTitle(CFG.name);
   useTheme("indigo");
-  const mine = store.get<HostedEvent[]>("rs.hosted", []);
+  const acct = useAccount();
+  // Signed in: the account's events. Otherwise: events hosted on this device.
+  const mine: HostedEvent[] = acct.email ? acct.events.map((e) => ({ code: e.code, key: e.hostKey, title: e.title, ts: e.addedAt })) : store.get<HostedEvent[]>("rs.hosted", []);
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -40,6 +43,17 @@ export function Home() {
     <div class="home">
       <header class="bar" style={{ background: "transparent", borderBottom: 0, position: "static" }}>
         <Brand />
+        <span class="grow" />
+        {acct.on &&
+          (acct.email ? (
+            <a class="btn sm ghost" href="/events">
+              {t("My events")}
+            </a>
+          ) : (
+            <a class="btn sm ghost" href="/signin">
+              {t("Sign in")}
+            </a>
+          ))}
       </header>
       <main class="home-main">
         <section>
@@ -94,7 +108,7 @@ export function Home() {
             {mine.length > 0 && (
               <div class="recent">
                 <p class="muted small" style={{ marginTop: 6 }}>
-                  {t("Your recent events on this device")}
+                  {acct.email ? t("Your events") : t("Your recent events on this device")}
                 </p>
                 <ul>
                   {mine.slice(0, 5).map((e) => (
@@ -107,6 +121,11 @@ export function Home() {
                     </li>
                   ))}
                 </ul>
+                {acct.email && mine.length > 5 && (
+                  <a class="small" href="/events">
+                    {t("See all your events")}
+                  </a>
+                )}
               </div>
             )}
           </form>

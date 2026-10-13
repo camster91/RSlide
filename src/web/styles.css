@@ -820,3 +820,8 @@ textarea.input.paste-input { min-height: 320px; font-family: ui-monospace, SFMon
 .hook-events { border: 0; padding: 0; margin: 0; display: grid; gap: 4px; }
 .notice.bad { background: color-mix(in srgb, #d9443a 14%, var(--surface)); }
 .api-settings p.mono { overflow-wrap: anywhere; }
+
+/* ---------- v0.9: host accounts ---------- */
+.my-events { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.my-events li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px 18px; }
+.my-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.05rem; margin-bottom: 4px; }

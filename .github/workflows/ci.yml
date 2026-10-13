@@ -26,8 +26,8 @@ jobs:
         run: npm test
       - name: Build
         run: |
-          # Lets the webhook tests deliver to a receiver on this machine (read at build time). Never set this in production.
-          echo 'WEBHOOK_ALLOW_PRIVATE="1"' > .dev.vars
+          # Test-only settings (read at build time): webhooks to this machine, and sign-in links in responses. Never set these in production.
+          printf 'WEBHOOK_ALLOW_PRIVATE="1"\nAUTH_DEV_LINKS="1"\n' > .dev.vars
           npm run build
       - name: Start app
         run: |

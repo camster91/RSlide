@@ -10,15 +10,31 @@
     "run_worker_first": ["/api/*"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "EVENTS", "class_name": "EventRoom" }]
+    "bindings": [
+      { "name": "EVENTS", "class_name": "EventRoom" },
+      // Optional host accounts. They only switch on once email is set up (see EMAIL_FROM below).
+      { "name": "ACCOUNTS", "class_name": "HostAccount" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["EventRoom"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["EventRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["HostAccount"] }
+  ],
+  // Host accounts send sign-in links by email. Pick one:
+  //  - Cloudflare Email Service (Workers paid plan): uncomment the next line and verify your domain
+  //    "send_email": [{ "name": "EMAIL", "remote": true }],
+  //  - Resend: set the RESEND_API_KEY secret (npx wrangler secret put RESEND_API_KEY)
+  // Then set EMAIL_FROM below to an address on your verified domain.
   // Storage for images in poll options. Remove this block to turn image uploads off.
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "rslide-media" }],
   "vars": {
     // Delete events this many hours after they are created. Leave empty to keep forever.
     "EVENT_TTL_HOURS": "",
     // Max attendees connected at once per event. "0" = unlimited.
-    "MAX_PARTICIPANTS": "0"
+    "MAX_PARTICIPANTS": "0",
+    // Sender for sign-in emails, e.g. "signin@yourdomain.com". Empty = host accounts off.
+    "EMAIL_FROM": "",
+    // Name used in sign-in emails.
+    "APP_NAME": "RSlide"
   }
 }

@@ -1,4 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
+import type { HostAccount } from "./accounts";
+import type { MailEnv } from "./mail";
 import {
   CLOSE,
   DEFAULT_SETTINGS,
@@ -68,8 +70,10 @@ import { parsePolls, type PasteResult } from "../shared/paste";
 import { checkWebhookUrl, cleanWebhookEvents, newApiKey, newSecret, signWebhook, WEBHOOK_BATCH_MS, WEBHOOK_MAX_BATCH, WEBHOOK_TIMEOUT_MS } from "./api";
 import { DUPLICATE_SCORE, fingerprint, similarity, vectorScore, type Fingerprint } from "../shared/similar";
 
-export interface Env extends AiEnv {
+export interface Env extends AiEnv, MailEnv {
   EVENTS: DurableObjectNamespace<EventRoom>;
+  /** Optional host accounts (sign in by email link). */
+  ACCOUNTS?: DurableObjectNamespace<HostAccount>;
   ASSETS: Fetcher;
   /** Optional R2 bucket for images in polls. */
   MEDIA?: R2Bucket;
