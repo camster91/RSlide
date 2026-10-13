@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "preact/hoo
 import { CLOSE, PING, type ClientMsg, type Reaction, type Role, type ServerMsg } from "../../shared/protocol";
 import { emptyRoom, reduce, type RoomState } from "../../shared/store";
 import { pid, toast } from "./util";
+import { t } from "./i18n";
 
 export type ConnStatus = "connecting" | "online" | "offline" | "not-found" | "full" | "forbidden" | "passcode";
 
@@ -39,7 +40,7 @@ export function useRoom(code: string, role: Role, opts: Options = {}) {
       };
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data as string) as ServerMsg;
-        if (msg.type === "error") toast(msg.message);
+        if (msg.type === "error") toast(t(msg.message));
         else if (msg.type === "reactions") onReactions.current?.(msg.counts);
         else dispatch(msg);
       };
@@ -75,7 +76,7 @@ export function useRoom(code: string, role: Role, opts: Options = {}) {
   const send = useCallback((msg: ClientMsg) => {
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-    else toast("Reconnecting… try again in a second");
+    else toast(t("Reconnecting… try again in a second"));
   }, []);
 
   return { state, status, send };

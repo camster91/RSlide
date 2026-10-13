@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import type { EventInfo, ScreenLook, ThemeName } from "../../shared/protocol";
+import { lang, plural, t } from "./i18n";
 
 // ---------- branding ----------
 export interface BrandConfig {
@@ -67,13 +68,12 @@ export function rememberHosted(e: HostedEvent) {
 // ---------- formatting ----------
 export function ago(ts: number): string {
   const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return new Date(ts).toLocaleDateString();
+  if (s < 60) return t("just now");
+  if (s < 3600) return t("{n} min ago", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("{n} h ago", { n: Math.floor(s / 3600) });
+  return new Date(ts).toLocaleDateString(lang);
 }
-const IRREGULAR: Record<string, string> = { person: "people" };
-export const plural = (n: number, w: string) => `${n} ${n === 1 ? w : (IRREGULAR[w] ?? `${w}s`)}`;
+export { plural };
 export const joinUrl = (code: string) => `${location.origin}/e/${code}`;
 export const normCode = (c: string) => c.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
