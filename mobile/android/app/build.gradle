@@ -4,7 +4,7 @@ android {
     namespace = "app.rslide.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "app.rslide.mobile"
+        applicationId "ca.ashbi.rslide"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // CI sets these from the build number and app.json; local builds use 1 / 1.0.0.

@@ -42,7 +42,8 @@ edit("android/app/src/main/AndroidManifest.xml", (s) => {
   return out.replace(/\n\s*<uses-permission android:name="android.permission.CAMERA" \/>/, "");
 });
 edit("android/app/src/main/res/values/strings.xml", (s) =>
-  s.replace(/<string name="app_name">[^<]*<\/string>/, `<string name="app_name">${esc(name)}</string>`).replace(/<string name="title_activity_main">[^<]*<\/string>/, `<string name="title_activity_main">${esc(name)}</string>`),
+  s.replace(/<string name="app_name">[^<]*<\/string>/, `<string name="app_name">${esc(name)}</string>`).replace(/<string name="title_activity_main">[^<]*<\/string>/, `<string name="title_activity_main">${esc(name)}</string>`)
+    .replace(/<string name="(package_name|custom_url_scheme)">[^<]*<\/string>/g, (_m, k) => `<string name="${k}">${appId}</string>`),
 );
 
 edit("android/app/build.gradle", (s) => s.replace(/applicationId "[^"]*"/, `applicationId "${appId}"`));

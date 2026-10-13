@@ -74,7 +74,7 @@ jobs:
         uses: r0adkll/upload-google-play@v1.1.3
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: ${{ vars.ANDROID_PACKAGE || 'app.rslide.mobile' }}
+          packageName: ${{ vars.ANDROID_PACKAGE || 'ca.ashbi.rslide' }}
           releaseFiles: mobile/android/app/build/outputs/bundle/release/app-release.aab
           track: internal
           status: draft
