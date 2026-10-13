@@ -32,7 +32,7 @@ ok(host.snap.polls[0].status === "closed", "live mode: one poll at a time");
 // Switch to self-paced.
 host.send({ type: "setSettings", settings: { selfPaced: true } });
 ok(await a.until(() => a.snap.meta.settings.selfPaced), "attendees see self-paced mode");
-ok(host.snap.meta.activePollId === null && host.snap.polls[2].status === "active", "the live poll stays open, with no 'current' poll");
+ok(await host.until(() => host.snap.meta.settings.selfPaced && host.snap.meta.activePollId === null && host.snap.polls[2].status === "active"), "the live poll stays open, with no 'current' poll");
 for (const p of [p1, q1]) host.send({ type: "activatePoll", pollId: p.id });
 ok(await a.until(() => a.snap.polls.filter((p) => p.status === "active").length === 3), "several polls open at once");
 
