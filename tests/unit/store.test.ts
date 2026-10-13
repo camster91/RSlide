@@ -3,7 +3,7 @@ import type { Meta, Poll, Question, Snapshot } from "../../src/shared/protocol";
 import { DEFAULT_SETTINGS } from "../../src/shared/protocol";
 import { applyOps, emptyRoom, reduce, secondsLeft, sortQuestions } from "../../src/shared/store";
 
-const meta: Meta = { code: "ABC123", title: "T", settings: DEFAULT_SETTINGS, presentMode: "auto", activePollId: null, labels: [], rooms: [] };
+const meta: Meta = { code: "ABC123", title: "T", settings: DEFAULT_SETTINGS, presentMode: "auto", activePollId: null, labels: [], rooms: [], recapPublic: false };
 const q = (id: string, votes = 0, ts = 0, extra: Partial<Question> = {}): Question => ({ id, text: id, name: "", ts, votes, downs: 0, status: "live", highlighted: false, edited: false, room: "main", labels: [], replies: [], ...extra });
 const poll = (id: string, ord: number, extra: Partial<Poll> = {}): Poll => ({ id, ord, type: "rating", title: id, options: [], images: [], multi: false, scale: 5, range: null, axes: null, image: null, status: "draft", showResults: true, revealed: false, timeLimit: 0, startedAt: null, items: [], ...extra });
 const snap = (over: Partial<Snapshot> = {}): Snapshot => ({ meta, questions: [], polls: [], results: {}, leaderboard: { top: [], players: 0, rounds: 0 }, online: 0, ...over });

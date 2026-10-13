@@ -764,3 +764,24 @@ html.overlay-mode, html.overlay-mode body { background: transparent !important; 
 .code-snippet { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; margin-top: 8px; resize: none; }
 .remote-modal { width: min(460px, calc(100% - 24px)); display: grid; gap: 12px; }
 .remote-q.hl .tag { justify-self: start; }
+
+/* ---------- v0.5: paste to polls ---------- */
+.modal .paste { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+@media (max-width: 720px) { .modal .paste { grid-template-columns: 1fr; } }
+textarea.input.paste-input { min-height: 320px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; line-height: 1.5; }
+.paste-list { margin: 0; padding-left: 22px; display: grid; gap: 10px; max-height: 340px; overflow-y: auto; }
+.paste-list li { display: grid; gap: 3px; }
+.paste-list .tag { justify-self: start; }
+.paste-correct { color: var(--brand); font-weight: 700; }
+.modal:has(.paste) { width: min(980px, calc(100% - 24px)); }
+.recap-modal { width: min(620px, calc(100% - 24px)); display: grid; gap: 12px; }
+
+/* ---------- v0.5: recap ---------- */
+.recap-summary { margin-top: 18px; font-size: 1.12rem; line-height: 1.6; max-width: 62ch; display: grid; gap: 12px; }
+.recap-summary p { margin: 0; }
+.recap-qs { padding-left: 24px; display: grid; gap: 16px; }
+.recap-q-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.recap-q-head .text { font-size: 1.05rem; overflow-wrap: anywhere; }
+.recap-reply { margin: 6px 0 0 0; padding: 8px 12px; border-left: 3px solid var(--brand); background: var(--brand-soft); border-radius: 0 10px 10px 0; font-size: 0.92rem; }
+.recap-foot { margin-top: 48px; text-align: center; }
+.recap-link { display: block; text-decoration: none; color: inherit; }

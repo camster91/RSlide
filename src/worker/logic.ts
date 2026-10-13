@@ -408,3 +408,41 @@ export function cleanRooms(list: unknown, newId: () => string): { id: string; na
   }
   return out;
 }
+
+/** Plain-text description of one poll's results, for the AI recap. Short on purpose. */
+export function resultsText(p: { type: string; title: string; options: string[]; correct?: number[] }, r: Results, depth = 0): string {
+  const pad = depth ? "  " : "";
+  const head = `${pad}${p.type === "quiz" ? "Quiz" : "Poll"}: ${p.title} (${r.total} ${r.total === 1 ? "answer" : "answers"})`;
+  if (!r.total) return head;
+  const pct = (n: number) => `${Math.round((n / r.total) * 100)}%`;
+  const lines: string[] = [];
+  switch (p.type) {
+    case "multiple":
+    case "quiz":
+      p.options.forEach((o, i) => lines.push(`${o}: ${pct(r.counts?.[i] ?? 0)}${p.type === "quiz" && p.correct?.includes(i) ? " (correct)" : ""}`));
+      break;
+    case "rating":
+    case "scale":
+      lines.push(`average ${r.avg}`);
+      break;
+    case "ranking":
+    case "points": {
+      const order = p.options.map((o, i) => [o, r.scores?.[i] ?? 0] as const).sort((a, b) => b[1] - a[1]);
+      lines.push(p.type === "ranking" ? `ranked: ${order.map(([o]) => o).join(" > ")}` : order.map(([o, s]) => `${o}: ${s} points`).join(", "));
+      break;
+    }
+    case "grid":
+      p.options.forEach((o, i) => lines.push(`${o}: ${r.pairs?.[i]?.join(", ")}`));
+      break;
+    case "wordcloud":
+      lines.push(`top words: ${(r.words ?? []).slice(0, 12).map(([w, n]) => `${w} (${n})`).join(", ")}`);
+      break;
+    case "open":
+      for (const a of (r.answers ?? []).slice(0, 12)) lines.push(`"${a.slice(0, 160)}"`);
+      break;
+    case "pin":
+      lines.push(`${r.total} pins on an image`);
+      break;
+  }
+  return [head, ...lines.map((l) => `${pad}  - ${l}`)].join("\n");
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   ITEM_TYPES,
   LABEL_COLORS,
@@ -20,8 +20,9 @@ import {
 } from "../../shared/protocol";
 import { resultsOf, sortQuestions } from "../../shared/store";
 import { TEMPLATES } from "../../shared/templates";
+import { parsePolls, type PasteResult } from "../../shared/paste";
 import { useRoom, type Send } from "../lib/room";
-import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, toast, uploadImage, useTheme, useTitle } from "../lib/util";
+import { CFG, joinUrl, mediaUrl, navigate, plural, rememberHosted, store, toast, uploadImage, useTheme, useTitle } from "../lib/util";
 import { Board, ConnProblem, Countdown, Empty, Icon, LabelChip, Podium, QrCode, QuestionMeta, Replies, ResultsView, TopBar, TYPE_HINT, TYPE_LABEL, VoteCount, whenText } from "../components/ui";
 
 type QTab = "live" | "pending" | "answered" | "archived";
@@ -66,8 +67,9 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [editing, setEditing] = useState<PollDraft | null>(null);
   const [drawer, setDrawer] = useState(false);
-  const [templates, setTemplates] = useState(false);
+  const [templates, setTemplates] = useState<false | AddTab>(false);
   const [remote, setRemote] = useState(false);
+  const [recap, setRecap] = useState(false);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const s = state.snapshot;
   useTitle(s ? `${moderator ? "Moderate" : "Host"}: ${s.meta.title}` : CFG.name);
@@ -171,7 +173,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
           <span class={`dot ${status === "online" ? "" : "off"}`} />
           <span class="num">{s?.online ?? 0}</span> online
         </span>
-        <ExportMenu code={code} hostKey={key} />
+        <ExportMenu code={code} hostKey={key} onRecap={() => setRecap(true)} />
         <button class="btn sm ghost" onClick={() => setDrawer(true)} aria-label="Event settings">
           <Icon.gear /> Settings
         </button>
@@ -223,7 +225,10 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
             <div class="panel stack">
               <div class="section-title">
                 <h2>Polls</h2>
-                <button class="btn sm ghost" onClick={() => setTemplates(true)}>
+                <button class="btn sm ghost" onClick={() => setTemplates("paste")} title="Paste a list of questions and turn them into polls">
+                  Paste
+                </button>
+                <button class="btn sm ghost" onClick={() => setTemplates("templates")}>
                   Templates
                 </button>
                 <button class="btn sm" onClick={() => setEditing(newDraft("multiple"))}>
@@ -263,8 +268,12 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
                 !editing && (
                   <Empty title="No polls yet">
                     Make a few before you start, or{" "}
-                    <button class="link-btn" onClick={() => setTemplates(true)}>
+                    <button class="link-btn" onClick={() => setTemplates("templates")}>
                       start from a template
+                    </button>{" "}
+                    or{" "}
+                    <button class="link-btn" onClick={() => setTemplates("paste")}>
+                      paste your questions
                     </button>
                     .
                   </Empty>
@@ -299,13 +308,18 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
 
       {drawer && meta && <SettingsDrawer code={code} hostKey={key} meta={meta} send={send} onClose={() => setDrawer(false)} />}
       {remote && <RemoteModal code={code} hostKey={key} onClose={() => setRemote(false)} />}
+      {recap && meta && <RecapModal code={code} hostKey={key} meta={meta} send={send} onClose={() => setRecap(false)} />}
       {templates && (
-        <TemplateGallery
+        <AddPolls
+          tab={templates}
+          code={code}
+          hostKey={key}
+          ai={!!meta?.ai}
           onClose={() => setTemplates(false)}
           onPick={(polls) => {
             send({ type: "importPolls", polls });
             setTemplates(false);
-            toast(`Added ${polls.length} polls`);
+            toast(polls.length === 1 ? "Added 1 poll" : `Added ${polls.length} polls`);
           }}
         />
       )}
@@ -315,7 +329,7 @@ export function Host({ code, moderator = false }: { code: string; moderator?: bo
 
 // ---------- export ----------
 
-function ExportMenu({ code, hostKey }: { code: string; hostKey: string }) {
+function ExportMenu({ code, hostKey, onRecap }: { code: string; hostKey: string; onRecap: () => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -352,6 +366,15 @@ function ExportMenu({ code, hostKey }: { code: string; hostKey: string }) {
           <a role="menuitem" href={`/analytics/${code}#${hostKey}`} target="_blank" rel="noopener">
             Analytics
           </a>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onRecap();
+            }}
+          >
+            Recap page to share with attendees
+          </button>
           <a role="menuitem" href={`/report/${code}#${hostKey}`} target="_blank" rel="noopener">
             Report to print or save as PDF
           </a>
@@ -367,6 +390,92 @@ function ExportMenu({ code, hostKey }: { code: string; hostKey: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ---------- recap ----------
+
+function RecapModal({ code, hostKey, meta, send, onClose }: { code: string; hostKey: string; meta: Meta; send: Send; onClose: () => void }) {
+  const [summary, setSummary] = useState(meta.recapSummary ?? "");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, []);
+  const url = `${location.origin}/recap/${code}`;
+  const saved = summary.trim() === (meta.recapSummary ?? "");
+  const write = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/events/${code}/ai/summary?key=${encodeURIComponent(hostKey)}`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setSummary(d.summary);
+      toast("Draft written. Check it, then save.");
+    } catch (e) {
+      toast((e as Error).message || "The AI didn't answer. Try again.");
+    }
+    setBusy(false);
+  };
+  return (
+    <>
+      <div class="drawer-backdrop" onClick={onClose} />
+      <div class="modal recap-modal" role="dialog" aria-modal="true" aria-label="Recap page">
+        <div class="spread">
+          <h2>Recap page</h2>
+          <button class="btn sm quiet" onClick={onClose} aria-label="Close">
+            <Icon.x />
+          </button>
+        </div>
+        <p class="muted small">
+          A page attendees can open after the event: your summary, the top questions with your replies, and poll results they could already see. Pending and archived questions are left out.
+        </p>
+        <label class="toggle">
+          <span>
+            Share the recap
+            <span class="muted small" style={{ display: "block" }}>
+              Anyone with the link can see it. Attendees also get a link in the event.
+            </span>
+          </span>
+          <input type="checkbox" checked={meta.recapPublic} onChange={(e) => send({ type: "setRecap", public: e.currentTarget.checked })} />
+        </label>
+        {meta.recapPublic && (
+          <div class="mod-link">
+            <input class="input" readOnly value={url} aria-label="Recap link" onFocus={(e) => e.currentTarget.select()} />
+            <button class="btn sm" onClick={() => copy(url, "Recap link copied")}>
+              Copy
+            </button>
+            <a class="btn sm ghost" href={url} target="_blank" rel="noopener">
+              Open
+            </a>
+          </div>
+        )}
+        <label class="label" for="recap-summary">
+          Summary
+        </label>
+        <textarea
+          id="recap-summary"
+          class="input"
+          rows={7}
+          maxLength={2000}
+          placeholder="A few lines about what came up. Leave empty to skip it."
+          value={summary}
+          onInput={(e) => setSummary(e.currentTarget.value)}
+        />
+        <div class="row">
+          <button class="btn sm" disabled={saved} onClick={() => send({ type: "setRecap", summary })}>
+            {saved ? "Saved" : "Save summary"}
+          </button>
+          {meta.ai && (
+            <button class="btn sm ghost" disabled={busy} onClick={write} title="Uses Workers AI on your Cloudflare account">
+              {busy ? "Writing…" : summary ? "Rewrite with AI" : "Write it with AI"}
+            </button>
+          )}
+        </div>
+        {meta.ai && <p class="muted tiny">AI drafts are never shared until you save them.</p>}
+      </div>
+    </>
   );
 }
 
@@ -407,32 +516,158 @@ function RemoteModal({ code, hostKey, onClose }: { code: string; hostKey: string
 
 // ---------- templates ----------
 
-function TemplateGallery({ onClose, onPick }: { onClose: () => void; onPick: (polls: PollDraft[]) => void }) {
+type AddTab = "templates" | "paste";
+
+const PASTE_EXAMPLE = `Which launch excites you most?
+- New dashboard
+- Mobile app
+- AI assistant
+
+What is 2 + 2?
+- 3
+- 4 *
+
+How clear is our roadmap? (rating)
+
+One word for this quarter`;
+
+function AddPolls({ tab: firstTab, code, hostKey, ai, onClose, onPick }: {
+  tab: AddTab;
+  code: string;
+  hostKey: string;
+  ai: boolean;
+  onClose: () => void;
+  onPick: (polls: PollDraft[]) => void;
+}) {
+  const [tab, setTab] = useState<AddTab>(firstTab);
+  const [text, setText] = useState(() => store.get(`rs.paste.${code}`, ""));
+  const [aiResult, setAiResult] = useState<PasteResult | null>(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, []);
+  useEffect(() => store.set(`rs.paste.${code}`, text), [text]);
+  const parsed = useMemo(() => parsePolls(text), [text]);
+  const result = aiResult ?? parsed;
+  const askAi = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/events/${code}/ai/polls?key=${encodeURIComponent(hostKey)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setAiResult(d as PasteResult);
+    } catch (e) {
+      toast((e as Error).message || "The AI didn't answer. Try again.");
+    }
+    setBusy(false);
+  };
   return (
     <>
       <div class="drawer-backdrop" onClick={onClose} />
-      <div class="modal" role="dialog" aria-modal="true" aria-label="Poll templates">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Add polls">
         <div class="spread">
-          <h2>Add polls from a template</h2>
+          <h2>Add polls</h2>
           <button class="btn sm quiet" onClick={onClose} aria-label="Close">
             <Icon.x />
           </button>
         </div>
-        <p class="muted small">The polls are added to the end of your list. You can edit them before you launch.</p>
-        <div class="tpl-grid">
-          {TEMPLATES.map((t) => (
-            <button key={t.id} class="tpl" onClick={() => onPick(t.polls)}>
-              <b>{t.name}</b>
-              <small>{t.description}</small>
-              <span class="count">{plural(t.polls.length, "poll")}</span>
-            </button>
-          ))}
+        <div class="tabs" role="tablist" style={{ marginTop: 12 }}>
+          <button class="tab" role="tab" aria-selected={tab === "paste"} onClick={() => setTab("paste")}>
+            Paste your questions
+          </button>
+          <button class="tab" role="tab" aria-selected={tab === "templates"} onClick={() => setTab("templates")}>
+            Templates
+          </button>
         </div>
+        {tab === "templates" ? (
+          <>
+            <p class="muted small" style={{ marginTop: 12 }}>The polls are added to the end of your list. You can edit them before you launch.</p>
+            <div class="tpl-grid">
+              {TEMPLATES.map((t) => (
+                <button key={t.id} class="tpl" onClick={() => onPick(t.polls)}>
+                  <b>{t.name}</b>
+                  <small>{t.description}</small>
+                  <span class="count">{plural(t.polls.length, "poll")}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div class="paste">
+            <div class="stack-sm">
+              <label class="label" for="paste" style={{ marginTop: 12 }}>
+                One question per block. Put options on the lines below, and a <b>*</b> after the right answer for a quiz.
+              </label>
+              <textarea
+                id="paste"
+                class="input paste-input"
+                placeholder={PASTE_EXAMPLE}
+                value={text}
+                onInput={(e) => {
+                  setText(e.currentTarget.value);
+                  setAiResult(null);
+                }}
+              />
+              <p class="muted tiny">
+                Hints in brackets set the type: (rating), (scale), (word cloud), (open), (ranking), (pick several).
+              </p>
+              {ai && (
+                <button class="btn sm ghost" disabled={busy || text.trim().length < 10} onClick={askAi} title="Uses Workers AI on your Cloudflare account">
+                  {busy ? "Thinking…" : "Messy notes? Let AI write the polls"}
+                </button>
+              )}
+            </div>
+            <div class="paste-preview" aria-live="polite">
+              <p class="label" style={{ marginTop: 12 }}>
+                {aiResult ? "AI suggestions" : "Preview"}
+                {result.polls.length > 0 && <span class="muted"> · {plural(result.polls.length, "poll")}</span>}
+              </p>
+              {result.polls.length ? (
+                <ol class="paste-list">
+                  {result.polls.map((p, i) => (
+                    <li key={i}>
+                      <span class="tag archived">{TYPE_LABEL[p.type]}</span>
+                      <b>{p.title}</b>
+                      {p.options.length > 0 && (
+                        <span class="muted small">
+                          {p.options.map((o, j) => (
+                            <span key={j} class={p.correct.includes(j) && p.type === "quiz" ? "paste-correct" : undefined}>
+                              {j ? " · " : ""}
+                              {o}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p class="muted small">Your polls will show up here as you type.</p>
+              )}
+              {result.notes.map((n, i) => (
+                <p key={i} class="notice small" style={{ marginTop: 6 }}>
+                  {n}
+                </p>
+              ))}
+              <div class="row" style={{ marginTop: 12 }}>
+                <button class="btn" disabled={!result.polls.length} onClick={() => onPick(result.polls)}>
+                  {result.polls.length ? `Add ${plural(result.polls.length, "poll")}` : "Add polls"}
+                </button>
+                {aiResult && (
+                  <button class="btn quiet" onClick={() => setAiResult(null)}>
+                    Back to my text
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

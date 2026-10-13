@@ -45,6 +45,8 @@ export const LIMITS = {
   room: 40,
   blockedWords: 100,
   importPolls: 30,
+  summary: 2000,
+  pasteText: 8000,
 } as const;
 
 export interface Settings {
@@ -125,6 +127,10 @@ export interface Meta {
   modKey?: string;
   /** Only sent to hosts: true if this server has Workers AI set up. */
   ai?: boolean;
+  /** Anyone with the link can see the recap page. */
+  recapPublic: boolean;
+  /** Only sent to hosts: the summary shown at the top of the recap. */
+  recapSummary?: string;
 }
 
 export interface Reply {
@@ -330,6 +336,7 @@ export type ClientMsg =
   | { type: "setPasscode"; passcode: string }
   | { type: "setPresentMode"; mode: PresentMode }
   | { type: "newModKey" }
+  | { type: "setRecap"; public?: boolean; summary?: string }
   | { type: "clearQuestions" }
   | { type: "savePoll"; poll: PollDraft }
   | { type: "duplicatePoll"; pollId: string }
@@ -384,4 +391,18 @@ export interface Analytics {
   timeline: { t: number; joins: number; questions: number; votes: number; answers: number; reactions: number }[];
   topQuestions: { text: string; score: number; status: QuestionStatus }[];
   rooms: { name: string; questions: number }[];
+}
+
+/** Public summary of an event, from GET /api/events/:code/recap (only when the host shares it). */
+export interface Recap {
+  code: string;
+  title: string;
+  createdAt: number;
+  summary: string;
+  logo: string | null;
+  theme: ThemeName;
+  stats: { participants: number; questions: number; votes: number; answers: number };
+  questions: { text: string; name: string; score: number; answered: boolean; replies: Reply[] }[];
+  polls: { poll: Poll; results: Results }[];
+  leaderboard: Leaderboard | null;
 }

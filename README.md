@@ -34,6 +34,8 @@
 - Open and close questions on a schedule; delete the whole event automatically on a set date
 - Start from 7 ready-made templates (class check-in, all-hands, retro, feedback, icebreakers, trivia, brainstorm) or copy one of your own events
 - Event logo, plus a live **analytics** page: who joined, peak attendance, activity over time, poll response rates, top questions
+- **Paste to polls**: paste a list of questions (options on the lines below, `*` for the quiz answer) and see them as polls before adding. With AI set up, messy notes work too
+- **Recap page** (`/recap/CODE`): share a summary, the top questions with your replies and the poll results. Write the summary yourself or draft it with AI
 - Build polls ahead of time, with images on options; launch, close, reorder, duplicate, clear answers
 - Quiz: set a timer (or none), reveal the answer, show the leaderboard on the big screen
 - Event passcode, and ask people for their name or name + email before they join
@@ -89,10 +91,10 @@ Set these under `vars` in `wrangler.jsonc` (or in the Cloudflare dashboard):
 | `EVENT_TTL_HOURS` | Delete each event this many hours after it's created. Good for public demos. | empty (keep forever) |
 | `MAX_PARTICIPANTS` | Most attendees allowed in one event at the same time. | `0` (no limit) |
 | `MEDIA` (R2 bucket) | Stores images on poll options. Remove the `r2_buckets` block to turn image uploads off. | `rslide-media` |
-| `AI` (Workers AI binding) | Optional. Lets hosts turn on **AI help for repeats** (multilingual). Add `"ai": { "binding": "AI" }` to `wrangler.jsonc`. Local dev then needs `wrangler login`. | off |
+| `AI` (Workers AI binding) | Optional. Turns on AI help: catching repeat questions (multilingual), notes-to-polls and recap summaries. Add `"ai": { "binding": "AI" }` to `wrangler.jsonc`. Local dev then needs `wrangler login`. | off |
 | `AI_ACCOUNT_ID` + `AI_API_TOKEN` | Optional. The same AI help, using a Workers AI API token instead of a binding. Set them as secrets. | empty |
 
-Repeat-question hints work without any AI: they compare words on your own server and send nothing elsewhere. AI help is off for every event until the host turns it on.
+Repeat-question hints and paste-to-polls work without any AI. They run on your own server and send nothing elsewhere. AI repeat-checking is off for every event until the host turns it on. AI polls and AI summaries only run when the host presses the button, and the host checks the result before anyone sees it.
 
 ## Make it yours
 
@@ -124,7 +126,7 @@ Browser ──HTTP──▶ Worker (src/worker/index.ts) ──▶ web app (Prea
 npm run typecheck
 npm test                     # unit tests
 npm run preview              # start the built app on http://localhost:8787, then in a second terminal:
-npm run test:e2e             # 200+ end-to-end checks with hosts, moderators, attendees and a big screen
+npm run test:e2e             # 240+ end-to-end checks with hosts, moderators, attendees and a big screen
 npm run test:load -- 2000    # 2,000 simulated attendees: poll, upvotes and a quiz reveal
 ```
 
@@ -147,8 +149,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for a deeper tour.
 
 See the full product plan in **[docs/ROADMAP.md](docs/ROADMAP.md)** — Slido Pro feature parity, design direction, architecture and release phases.
 
-Done: Slido Pro-level Q&A, polls, quizzes, moderation, analytics and exports (v0.1–v0.3), plus repeat-question merging, phone remote, stream overlay and website embed (v0.4).
-Next up: host accounts, AI recap of an event, paste-to-polls, public API and webhooks, translations.
+Done: Slido Pro-level Q&A, polls, quizzes, moderation, analytics and exports (v0.1–v0.3), plus repeat-question merging, phone remote, stream overlay and website embed (v0.4), and paste-to-polls and recap pages (v0.5).
+Next up: host accounts, public API and webhooks, translations, team quizzes.
 
 Contributions welcome — read [CONTRIBUTING.md](CONTRIBUTING.md), pick any unchecked item and open an issue.
 

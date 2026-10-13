@@ -226,6 +226,11 @@ function QATab({ s, me, send }: { s: NonNullable<ReturnType<typeof useRoom>["sta
           ))}
         </div>
       )}
+      {s.meta.recapPublic && (
+        <a class="notice recap-link" href={`/recap/${s.meta.code}`}>
+          The host shared a recap of this event. <b>See the recap</b>
+        </a>
+      )}
       {!settings.qaOpen && settings.qaOpensAt && <p class="notice">Questions open at {whenText(settings.qaOpensAt)}.</p>}
       {settings.qaOpen && settings.qaClosesAt && <p class="notice">Questions close at {whenText(settings.qaClosesAt)}.</p>}
       <form class="ask" onSubmit={ask}>

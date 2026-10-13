@@ -91,3 +91,33 @@ describe("AI helper", () => {
     expect([...v]).toEqual([0.5, -1, 2]);
   });
 });
+
+import { chat, POLLS_PROMPT } from "../../src/worker/ai";
+import { parsePolls } from "../../src/shared/paste";
+import { resultsText } from "../../src/worker/logic";
+
+describe("AI chat and recap text", () => {
+  it("sends a system and user message and returns the text", async () => {
+    const run = vi.fn(async (_m: string, _i: unknown) => ({ response: "  Hello  " }));
+    expect(await chat({ AI: { run } }, "sys", "hi")).toBe("Hello");
+    const input = run.mock.calls[0][1] as { messages: { role: string }[] };
+    expect(input.messages.map((m) => m.role)).toEqual(["system", "user"]);
+    await expect(chat({ AI: { run: async () => ({ response: "" }) } }, "s", "u")).rejects.toThrow();
+  });
+
+  it("AI output in the paste format becomes polls", async () => {
+    const reply = "Which tool do you use most?\n- Slack\n- Email\n\nWhat year did the web start?\n- 1989 *\n- 1999\n\nHow useful was this? (rating)";
+    const out = await chat({ AI: { run: async () => ({ response: reply }) } }, POLLS_PROMPT, "notes");
+    expect(parsePolls(out).polls.map((p) => p.type)).toEqual(["multiple", "quiz", "rating"]);
+  });
+
+  it("describes results in plain text", () => {
+    expect(resultsText({ type: "multiple", title: "Pick", options: ["A", "B"] }, { total: 4, counts: [3, 1] })).toBe("Poll: Pick (4 answers)\n  - A: 75%\n  - B: 25%");
+    expect(resultsText({ type: "quiz", title: "Q", options: ["x", "y"], correct: [1] }, { total: 2, counts: [1, 1] })).toContain("y: 50% (correct)");
+    expect(resultsText({ type: "rating", title: "R", options: [] }, { total: 3, avg: 4.3 })).toContain("average 4.3");
+    expect(resultsText({ type: "ranking", title: "Rank", options: ["a", "b"] }, { total: 2, scores: [0.5, 1] })).toContain("ranked: b > a");
+    expect(resultsText({ type: "wordcloud", title: "W", options: [] }, { total: 2, words: [["fun", 2]] })).toContain("fun (2)");
+    expect(resultsText({ type: "open", title: "O", options: [] }, { total: 1, answers: ["More snacks"] })).toContain('"More snacks"');
+    expect(resultsText({ type: "open", title: "Empty", options: [] }, { total: 0 })).toBe("Poll: Empty (0 answers)");
+  });
+});

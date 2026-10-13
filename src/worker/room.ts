@@ -27,6 +27,7 @@ import {
   type Profanity,
   type Question,
   type QuestionStatus,
+  type Recap,
   type Reaction,
   type Reply,
   type ResponseValue,
@@ -49,6 +50,7 @@ import {
   newId,
   normPasscode,
   quizPoints,
+  resultsText,
   RateLimiter,
   tally,
   toCsv,
@@ -58,7 +60,8 @@ import {
   type CleanPoll,
 } from "./logic";
 import { buildXlsx, type Cell, type Sheet } from "./xlsx";
-import { AI_DUPLICATE_SCORE, aiAvailable, embed, packVector, unpackVector, type AiEnv } from "./ai";
+import { AI_DUPLICATE_SCORE, aiAvailable, chat, embed, packVector, POLLS_PROMPT, SUMMARY_PROMPT, unpackVector, type AiEnv } from "./ai";
+import { parsePolls, type PasteResult } from "../shared/paste";
 import { DUPLICATE_SCORE, fingerprint, similarity, vectorScore, type Fingerprint } from "../shared/similar";
 
 export interface Env extends AiEnv {
@@ -86,6 +89,8 @@ interface EventRecord {
   labels: Label[];
   rooms: Room[];
   stats: { peakOnline: number; peakAt: number | null };
+  /** Public recap page: shared or not, and the host's summary. */
+  recap: { public: boolean; summary: string };
 }
 
 interface Attachment {
@@ -189,6 +194,8 @@ export class EventRoom extends DurableObject<Env> {
   private asksLimit = new RateLimiter(5, 60_000);
   private repliesLimit = new RateLimiter(5, 60_000);
   private reactLimit = new RateLimiter(10, 5_000);
+  /** AI calls cost money on the host's account, so keep them to a sensible pace. */
+  private aiLimit = new RateLimiter(10, 600_000);
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -209,6 +216,7 @@ export class EventRoom extends DurableObject<Env> {
         this.ev.labels ??= [];
         this.ev.rooms ??= [];
         this.ev.stats ??= { peakOnline: 0, peakAt: null };
+        this.ev.recap ??= { public: false, summary: "" };
       }
     });
   }
@@ -290,6 +298,7 @@ export class EventRoom extends DurableObject<Env> {
       labels: [],
       rooms: [],
       stats: { peakOnline: 0, peakAt: null },
+      recap: { public: false, summary: "" },
     };
     this.sql.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('event', ?)", JSON.stringify(ev));
     for (const q of old.questions ?? []) {
@@ -337,6 +346,7 @@ export class EventRoom extends DurableObject<Env> {
       labels: [],
       rooms: [],
       stats: { peakOnline: 0, peakAt: null },
+      recap: { public: false, summary: "" },
     };
     this.persistEvent();
     await this.scheduleAlarm();
@@ -478,6 +488,99 @@ export class EventRoom extends DurableObject<Env> {
       sheets.push({ name: "Participants", rows: [["Name", "Email", "Joined at"], ...people.map(([, p]) => [p.name, p.email, new Date(p.joinedAt).toISOString()] as Cell[])] });
 
     return buildXlsx(sheets);
+  }
+
+  // ---------- recap and AI helpers ----------
+
+  /** The public recap page. Null unless the host chose to share it. */
+  async recap(): Promise<Recap | null> {
+    const ev = this.ev;
+    if (!ev?.recap.public) return null;
+    const count = (q: string) => this.sql.exec<{ n: number }>(q).one().n;
+    const hide = ev.settings.hideNames;
+    const replies = this.repliesFor(null);
+    const questions = this.sql
+      .exec<QuestionRow>("SELECT * FROM questions WHERE status IN ('live','answered') ORDER BY (votes - downs) DESC, ts ASC LIMIT 30")
+      .toArray()
+      .map((q) => ({
+        text: ev.settings.profanity === "review" ? maskWords(q.text, ev.settings.blockedWords).text : q.text,
+        name: hide ? "" : q.name,
+        score: q.votes - (q.downs ?? 0),
+        answered: q.status === "answered",
+        replies: (replies.get(q.id) ?? []).filter((r) => r.official),
+      }));
+    // Only polls whose results the audience was allowed to see.
+    const polls = this.allPolls()
+      .filter((p) => p.status !== "draft" && (p.type === "quiz" ? p.revealed : p.showResults))
+      .map((p) => ({ poll: this.pollView(p, "present"), results: this.results(p.id) }))
+      .filter((x) => x.results.total > 0);
+    const lb = this.leaderboard().board;
+    return {
+      code: ev.code,
+      title: ev.title,
+      createdAt: ev.createdAt,
+      summary: ev.recap.summary,
+      logo: ev.settings.logo,
+      theme: ev.settings.theme,
+      stats: {
+        participants: count("SELECT COUNT(*) AS n FROM seen"),
+        questions: count("SELECT COUNT(*) AS n FROM questions WHERE status != 'pending'"),
+        votes: count("SELECT COUNT(*) AS n FROM votes"),
+        answers: count("SELECT COUNT(*) AS n FROM responses"),
+      },
+      questions,
+      polls,
+      leaderboard: lb.rounds > 0 ? { ...lb, top: lb.top.slice(0, 10) } : null,
+    };
+  }
+
+  private async aiGate(key: string) {
+    if (!(await this.isHost(key))) throw new UserError("Forbidden");
+    if (!aiAvailable(this.env)) throw new UserError("AI isn't set up on this server");
+    if (!this.aiLimit.take("host")) throw new UserError("That's a lot of AI requests. Try again in a few minutes.");
+  }
+
+  /** Turns rough notes into poll drafts. The host reviews them before adding. */
+  async aiPolls(key: string, text: string): Promise<PasteResult | { error: string }> {
+    try {
+      await this.aiGate(key);
+      const notes = clean(text, LIMITS.pasteText);
+      if (notes.length < 10) throw new UserError("Paste a few more lines of notes first");
+      const out = await chat(this.env, POLLS_PROMPT, notes, 1200);
+      const result = parsePolls(out);
+      if (!result.polls.length) throw new UserError("The AI didn't come up with any polls. Try more detailed notes.");
+      return result;
+    } catch (e) {
+      return { error: e instanceof UserError ? e.message : "The AI service didn't answer. Try again." };
+    }
+  }
+
+  /** Drafts the recap summary from questions and poll results. The host edits before sharing. */
+  async aiSummary(key: string): Promise<{ summary: string } | { error: string }> {
+    try {
+      await this.aiGate(key);
+      const ev = this.ev!;
+      const qs = this.sql
+        .exec<QuestionRow>("SELECT * FROM questions WHERE status IN ('live','answered') ORDER BY (votes - downs) DESC LIMIT 40")
+        .toArray();
+      const replies = this.repliesFor(qs.map((q) => q.id));
+      const qText = qs
+        .map((q) => {
+          const official = (replies.get(q.id) ?? []).filter((r) => r.official).map((r) => ` | host reply: ${r.text.slice(0, 200)}`).join("");
+          return `- (${q.votes - (q.downs ?? 0)} votes${q.status === "answered" ? ", answered" : ", not answered"}) ${q.text}${official}`;
+        })
+        .join("\n");
+      const pText = this.allPolls()
+        .filter((p) => p.status !== "draft")
+        .map((p) => (p.type === "survey" ? [`Survey: ${p.title}`, ...p.items.map((it, i) => resultsText(it, this.results(p.id).items?.[i] ?? { total: 0 }, 1))].join("\n") : resultsText(p, this.results(p.id))))
+        .join("\n\n");
+      if (!qs.length && !pText) throw new UserError("There's nothing to summarize yet");
+      const data = `Event: ${ev.title}\n\nTop audience questions:\n${qText || "(none)"}\n\nPolls:\n${pText || "(none)"}`.slice(0, 12_000);
+      const summary = (await chat(this.env, SUMMARY_PROMPT, data, 500)).slice(0, LIMITS.summary);
+      return { summary };
+    } catch (e) {
+      return { error: e instanceof UserError ? e.message : "The AI service didn't answer. Try again." };
+    }
   }
 
   async analytics(key: string): Promise<Analytics | null> {
@@ -1069,6 +1172,10 @@ export class EventRoom extends DurableObject<Env> {
   private handleHost(msg: ClientMsg) {
     const ev = this.ev!;
     switch (msg.type) {
+      case "setRecap":
+        if (typeof msg.public === "boolean") ev.recap.public = msg.public;
+        if (typeof msg.summary === "string") ev.recap.summary = msg.summary.replace(/\r\n?/g, "\n").trim().slice(0, LIMITS.summary);
+        return this.saveEvent();
       case "setTitle":
         ev.title = clean(msg.title, LIMITS.title) || ev.title;
         return this.saveEvent();
@@ -1455,7 +1562,8 @@ export class EventRoom extends DurableObject<Env> {
       activePollId: ev.activePollId,
       labels: ev.labels,
       rooms: ev.rooms,
-      ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey, ai: aiAvailable(this.env) } : {}),
+      recapPublic: ev.recap.public,
+      ...(role === "host" ? { passcode: ev.passcode, modKey: ev.modKey, ai: aiAvailable(this.env), recapSummary: ev.recap.summary } : {}),
     };
   }
 

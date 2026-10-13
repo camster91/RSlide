@@ -22,7 +22,7 @@ npm run dev        # http://localhost:5173 — hot reload for the web app and th
 ## Project layout
 
 ```
-src/shared/     Message types, the client-side state reducer, built-in templates and the similar-question matcher
+src/shared/     Message types, the client-side state reducer, built-in templates, the similar-question matcher and the paste-to-polls parser
 src/worker/     Cloudflare Worker + EventRoom Durable Object (one per event)
   index.ts      HTTP routes
   room.ts       Real-time event room: SQLite storage, permissions, batched patches
@@ -30,7 +30,7 @@ src/worker/     Cloudflare Worker + EventRoom Durable Object (one per event)
   xlsx.ts       Tiny Excel writer used by exports
   ai.ts         Optional Workers AI helpers (off unless set up)
 src/web/        Preact front end
-  views/        Home, Attendee, Host (also the moderator view), Present (big screen + stream overlay), Remote, Report, Analytics
+  views/        Home, Attendee, Host (also the moderator view), Present (big screen + stream overlay), Remote, Report, Recap, Analytics
   components/   Shared UI pieces: results for every poll type, countdown, podium, reactions
   styles.css    Design tokens, 6 theme presets (light + dark) and all styles
   lib/          WebSocket hook, routing, storage helpers

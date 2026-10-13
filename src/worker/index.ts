@@ -62,6 +62,26 @@ export default {
 
     if (action === "ws") return room.fetch(request);
 
+    if (action === "recap" && request.method === "GET") {
+      const recap = await room.recap();
+      return recap ? json(recap) : json({ error: "This recap isn't shared" }, 404);
+    }
+
+    // Optional AI helpers. Both need the host key and Workers AI set up.
+    if (action === "ai" && request.method === "POST") {
+      const what = parts[4];
+      if (what === "polls") {
+        const body = (await request.json().catch(() => ({}))) as { text?: string };
+        const r = await room.aiPolls(key, String(body.text ?? ""));
+        return "error" in r ? json(r, r.error === "Forbidden" ? 403 : 400) : json(r);
+      }
+      if (what === "summary") {
+        const r = await room.aiSummary(key);
+        return "error" in r ? json(r, r.error === "Forbidden" ? 403 : 400) : json(r);
+      }
+      return json({ error: "Not found" }, 404);
+    }
+
     if (action === "analytics") {
       const data = await room.analytics(key);
       return data ? json(data) : json({ error: "Forbidden" }, 403);

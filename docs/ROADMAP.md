@@ -249,8 +249,8 @@ Time estimates assume one main developer with AI help. Each phase ends with a ta
 ### Phase 3 — Beyond Slido (weeks 9–12) → **v1.0**
 - [x] Smart Q&A: repeat hints + one-click merge (no AI needed), "already asked?" while typing, optional Workers AI for reworded / other-language repeats
 - [ ] Smart Q&A, part 2: translate, moderation assist
-- [ ] Paste-to-polls (AI)
-- [ ] Recap pages + AI summary
+- [x] Paste-to-polls (plain-text format, live preview; optional AI turns messy notes into polls)
+- [x] Recap pages (`/recap/CODE`, shared by the host) + optional AI summary draft
 - [x] Presenter remote (`/remote/CODE`, QR code from the host page)
 - [x] Stream overlay mode (`/present/CODE?overlay=1`)
 - [x] Embed script for any website (`/embed.js`)
