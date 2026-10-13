@@ -55,6 +55,8 @@ ok(await host.until(() => host.snap.questions.find((q) => q.id === repeat.id)?.r
 
 host.send({ type: "mergeQuestion", id: repeat.id, into: first.id });
 ok(await a.until(() => !a.snap.questions.some((q) => q.id === repeat.id)), "merged question disappears for everyone");
+// Wait for the host's copy too (each screen gets its update separately).
+await host.until(() => !host.snap.questions.some((q) => q.id === repeat.id) && host.snap.questions.find((q) => q.id === first.id)?.votes === 3);
 const merged = host.snap.questions.find((q) => q.id === first.id)!;
 // first had: b. repeat had: c, a. Bo (who asked the repeat) also counts. Ann's own question: she now has a vote on it too.
 ok(merged.votes === 3, `votes move over without double counting (got ${merged.votes}, want 3: Bo, Cy and Ann)`);
