@@ -1194,7 +1194,9 @@ export class EventRoom extends DurableObject<Env> {
         if (!raw) throw new UserError("Question is empty");
         const { text, hit } = this.filter(raw, role);
         const review = ev.settings.profanity === "review";
-        const status = review && hit ? "pending" : q.status;
+        // Approval covers the submitted text, not any replacement the author
+        // writes later. Staff can still edit their own questions directly.
+        const status = !isStaff(role) && (ev.settings.moderation || (review && hit)) ? "pending" : q.status;
         this.sql.exec("UPDATE questions SET text = ?, edited = 1, status = ?, dup_of = NULL WHERE id = ?", review ? raw : text, status, q.id);
         this.sql.exec("DELETE FROM vectors WHERE qid = ?", q.id);
         this.prints.delete(q.id);

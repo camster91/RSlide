@@ -180,7 +180,10 @@ export class Workspace extends DurableObject {
 
   async removeEvent(by: string, code: string) {
     await this.need(by, "editor");
-    this.sql.exec("DELETE FROM events WHERE code = ?", code);
+    // Check and remove in the same SQL statement: an absent event must never
+    // authorise a plan change on an arbitrary event code in the route.
+    const removed = this.sql.exec<{ code: string }>("DELETE FROM events WHERE code = ? RETURNING code", code).toArray();
+    if (!removed.length) throw new UserError("This event isn't in this workspace");
   }
 
   // ---------- plan (set by the Stripe webhook) ----------

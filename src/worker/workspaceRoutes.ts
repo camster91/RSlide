@@ -132,7 +132,8 @@ async function route(req: Request, env: Env, url: URL, parts: string[], who: Ses
     }
     if (req.method === "DELETE" && parts[4]) {
       await ws.removeEvent(who.email, normCode(parts[4]));
-      // Leaving a paid workspace drops the event back to the free limit.
+      // removeEvent rejects codes absent from this workspace before we can
+      // change their plan. Leaving a paid workspace reinstates the free attendee limit.
       if (detail.plan === "pro") await env.EVENTS.getByName(normCode(parts[4])).setPlan("free");
       return json({ ok: true });
     }
