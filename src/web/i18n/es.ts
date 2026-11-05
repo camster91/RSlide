@@ -889,6 +889,7 @@ const dict: Dict = {
     "This invite has expired or was already used. Ask for a new one.": "Esta invitación caducó o ya se usó. Pide una nueva.",
     "This invite link isn't complete": "Este enlace de invitación está incompleto",
     "This invite was sent to a different email address. Sign in with that one.": "Esta invitación se envió a otro correo. Entra con ese.",
+    "This event isn't in this workspace": "Este evento no está en este espacio",
     "This workspace doesn't exist any more": "Este espacio ya no existe",
     "This workspace has the most events allowed": "Este espacio tiene el máximo de eventos permitido",
     "This workspace is full": "Este espacio está lleno",
