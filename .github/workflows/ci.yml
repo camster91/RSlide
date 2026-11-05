@@ -24,6 +24,11 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test
+      # SQLite and TypeScript transformation are built into Node 24. Keep the
+      # existing minimum-version matrix while running real Worker regressions.
+      - name: Worker SQLite regressions
+        if: matrix.node == '24.x'
+        run: npm run test:regressions
       - name: Build
         run: |
           # Test-only settings (read at build time): webhooks to this machine, and sign-in links in responses. Never set these in production.
