@@ -75,7 +75,7 @@
 
 ## Quick start
 
-Use Node.js 22.12 or newer on 22.x, or Node.js 24.x. The package engine range matches the locked build/test tools; CI checks dependency engines on 22.12.0, current 22.x and 24.x.
+Use Node.js 22.12 or newer on 22.x, Node.js 24.x, or Node.js 26 and newer. The package engine range matches the locked build/test tools; CI checks dependency engines on 22.12.0, current 22.x and 24.x.
 
 ```bash
 git clone https://github.com/camster91/RSlide.git
@@ -119,6 +119,7 @@ Set these under `vars` in `wrangler.jsonc` (or in the Cloudflare dashboard):
 | `OIDC_ALLOWED_DOMAINS` | Only these email domains may sign in with SSO, e.g. `acme.com, acme.ca`. | empty (any) |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID` | Optional **paid plans** for team workspaces (secrets). Point a Stripe webhook at `/api/billing/webhook`. | empty (off) |
 | `FREE_MAX_PARTICIPANTS` / `PRO_MAX_PARTICIPANTS` | Attendees at once per event on each plan. Empty = `MAX_PARTICIPANTS`. | empty |
+| `ANDROID_PACKAGE`, `ANDROID_CERT_SHA256`, `APPLE_APP_IDS` | Optional. Event links open in your phone app. See [docs/MOBILE.md](docs/MOBILE.md). | empty (off) |
 
 Team workspaces need host accounts (email or SSO). The `WORKSPACES` Durable Object is already in `wrangler.jsonc`.
 
@@ -165,7 +166,8 @@ Browser ──HTTP──▶ Worker (src/worker/index.ts) ──▶ web app (Prea
 ```bash
 npm run typecheck
 npm test                     # unit tests
-npm run preview              # start the built app on http://localhost:8787, then in a second terminal:
+npm run test:regressions     # Worker SQLite regressions (needs Node.js 24)
+npm run preview -- --port 8787 --host 127.0.0.1   # build and start the app, then in a second terminal:
 npm run test:e2e             # 450+ end-to-end checks
 ```
 
@@ -181,6 +183,8 @@ OIDC_NAME="Test SSO"
 OIDC_ALLOWED_DOMAINS="example.com"
 ```
 
+The end-to-end and load tests use `http://127.0.0.1:8787` unless you set `BASE_URL`.
+
 ```bash
 npm run test:load -- 2000    # 2,000 simulated attendees: poll, upvotes and a quiz reveal
 ```
@@ -191,11 +195,12 @@ Point `BASE_URL` at a deployed copy to test real performance: `BASE_URL=https://
 
 ```
 src/shared/    Message types and state reducer (shared by server, browser and tests)
-src/worker/    Cloudflare Worker and the EventRoom Durable Object
+src/worker/    Cloudflare Worker and the EventRoom, HostAccount and Workspace Durable Objects
 src/web/       Preact web app: views, components, styles
 public/        Static files, including config.js for branding
-tests/         Unit, end-to-end and load tests
-docs/          Roadmap and product plan
+mobile/        Optional iPhone and Android app (Capacitor)
+tests/         Unit, regression, end-to-end and load tests
+docs/          Roadmap, API, integrations and phone app guides
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for a deeper tour.
